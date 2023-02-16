@@ -1,0 +1,20 @@
+[tool]
+[tool.pdm]
+
+[project]
+name = "nasctn-sea-ingest"
+version = "0.0"
+description = "aggregation of 'seamf' SEA sensor output data files"
+authors = [
+    {name = "Dan Kuester", email = "daniel.kuester@nist.gov"},
+]
+dependencies = [
+    "pyarrow>=11.0.0",
+    "pandas>=1.5.3",
+    "numpy>=1.24.2",
+    "methodtools>=0.4.7",
+    "frozendict>=2.3.4",
+    "quickle>=0.4.0",
+]
+requires-python = ">=3.9"
+license = {file = "LICENSE.md"}

@@ -208,6 +208,9 @@ def _read_seamf_zipfile_divisions(zipfile_or_path, partition_size: int, file_lis
 
     with zfile:
         division_list = file_list[::partition_size]
+        if len(division_list) % partition_size != 0:
+            division_list.append(file_list[-1])
+            
         dicts = [single_read(zfile, filename) for filename in division_list]
 
     starts = [

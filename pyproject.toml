@@ -1,5 +1,9 @@
 [tool]
 [tool.pdm]
+[tool.pdm.dev-dependencies]
+dev = [
+    "labbench>=0.23.4",
+]
 
 [project]
 name = "nasctn-sea-ingest"
@@ -15,6 +19,10 @@ dependencies = [
     "methodtools>=0.4.7",
     "frozendict>=2.3.4",
     "quickle>=0.4.0",
+    "natsort>=8.2.0",
+    "pint>=0.20.1",
+    "orjson>=3.8.6",
+    "fastparquet>=2023.2.0",
 ]
 requires-python = ">=3.9"
 license = {file = "LICENSE.md"}

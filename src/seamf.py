@@ -1,6 +1,6 @@
 import functools
 import pandas as pd
-import json
+import orjson
 from pathlib import Path
 from tarfile import TarFile
 import numpy as np
@@ -39,8 +39,9 @@ def deepfreeze(obj):
         return obj
 
 def iso_to_datetime(s, tz):
-    # TODO: pandas is probably overkill for this. faster to use datetime directly?
-    return pd.to_datetime(s).tz_convert(tz)
+    # tz_localize(None) changes to "timezone-naive" timestamp, so you don't have to
+    # specify timezone
+    return pd.to_datetime(s).tz_convert(tz).tz_localize(None)
 
 _TI = namedtuple('_TI', field_names=('type', 'metadata'))
 
@@ -494,7 +495,7 @@ def read_seamf(file, force_loader_cls=False, container_cls=pd.DataFrame) -> dict
 
         # meta is plain json
         meta_name = '/'.join((name, name+'.sigmf-meta'))
-        meta = json.loads(tar_fd.extractfile(meta_name).read())
+        meta = orjson.loads(tar_fd.extractfile(meta_name).read())
 
         data_name = '/'.join((name, name+'.sigmf-data'))
         lzma_data = tar_fd.extractfile(data_name).read()
@@ -521,3 +522,18 @@ def read_seamf(file, force_loader_cls=False, container_cls=pd.DataFrame) -> dict
         return loader.unpack_arrays(data)
     else:
         raise TypeError('invalid "container_cls"')
+
+def read_seamf_meta(file):
+    if isinstance(file, (str, Path)):
+        kws = {'name': file}
+    else:
+        kws = {'fileobj': file}
+
+    with TarFile(**kws) as tar_fd:
+        name = tar_fd.getnames()[0]
+
+        # meta is plain json
+        meta_name = '/'.join((name, name+'.sigmf-meta'))
+        meta = orjson.loads(tar_fd.extractfile(meta_name).read())
+
+    return meta

@@ -3,12 +3,15 @@
 [tool.pdm.dev-dependencies]
 dev = [
     "labbench>=0.23.4",
+    "matplotlib>=3.7.0",
+    "jupyter>=1.0.0",
+    "black>=23.1.0",
 ]
 
 [project]
 name = "nasctn-sea-ingest"
 version = "0.0"
-description = "aggregation of 'seamf' SEA sensor output data files"
+description = "quick load and aggregate for low-level 'seamf' SEA sensor output data files"
 authors = [
     {name = "Dan Kuester", email = "daniel.kuester@nist.gov"},
 ]
@@ -20,9 +23,16 @@ dependencies = [
     "frozendict>=2.3.4",
     "quickle>=0.4.0",
     "natsort>=8.2.0",
-    "pint>=0.20.1",
-    "orjson>=3.8.6",
-    "fastparquet>=2023.2.0",
+    "matplotlib>=3.7.0",
+    "matplotlib-inline>=0.1.6",
+    "msgpack>=1.0.4",
+    "bokeh~=2.4",
+    "eliot>=1.14.0",
+    "loguru>=0.6.0",
+    "distributed>=2023.2.1",
+    "dask[complete]>=2023.3.0",
+    "lz4>=4.3.2",
+    "viztracer>=0.15.6",
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.8"
 license = {file = "LICENSE.md"}

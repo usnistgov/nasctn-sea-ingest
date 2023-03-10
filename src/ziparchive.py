@@ -5,11 +5,13 @@ import pandas as pd
 import numpy as np
 from pathlib import Path
 from natsort import natsorted
+import sys
+from eliot import log_call, start_action, log_message
 
 try:
-    from .seamf import read_seamf, read_seamf_meta, iso_to_datetime
+    from .seamf import read_seamf, read_seamf_meta, _iso_to_datetime
 except ImportError:
-    from seamf import read_seamf, read_seamf_meta, iso_to_datetime
+    from seamf import read_seamf, read_seamf_meta, _iso_to_datetime
 
 class QuackZipInfo(quickle.Struct):
     """ duck-typed ZipInfo clone for fast IPC serialized with quickle """
@@ -66,7 +68,7 @@ class CachedZipFile(zipfile.ZipFile):
             setattr(self, k, v)
 
 class MultiProcessingZipFile:
-    """ Serializable ZipFile for fast IPC.
+    """ Serializable ZipFile wrapper for fast IPC.
 
     It remains closed unless a context is opened. While open, the
     object is not serializable.
@@ -83,6 +85,7 @@ class MultiProcessingZipFile:
             filelist = QuackZipInfo.from_filelist(zfile.filelist)
             NameToInfo = dict(zip(zfile.NameToInfo.keys(), filelist))
             self.cache = CachedZipFile._encoder.dumps(dict(
+                filename=zfile.filename,
                 _comment=zfile._comment,
                 start_dir=zfile.start_dir,
                 filelist=filelist,
@@ -96,6 +99,8 @@ class MultiProcessingZipFile:
         self.kws = dict(kws)
 
     def namelist(self, sort=True):
+        if self._zfile is None:
+            raise IOError('need to open context first')
         ret = self._names
         if sort:
             ret = natsorted(ret)
@@ -117,7 +122,6 @@ class MultiProcessingZipFile:
     def from_mpzipfile(cls, zfile):
         return cls(cache=zfile.cache, *zfile.args, **zfile.kws)
 
-
     def open(self, fn):
         if self._zfile is None:
             raise IOError('open a zipfile context first')
@@ -137,54 +141,95 @@ def concat_dicts(*dicts):
         return dicts[0]
     elif len(dicts)==0:
         return None
-    
+
     return {
         k: pd.concat([d[k] for d in dicts])
         for k in dicts[0].keys()
         if isinstance(dicts[0][k], pd.DataFrame)
     }
 
+from traceback import format_tb
+import sys
 
-def read_seamf_zipfile(zipfile_or_path, force_loader_cls=False, dtype=pd.DataFrame, allowlist:list=None, trace_type:str=None) -> list:
+def read_seamf_zipfile(zipfile_or_path, force_loader_cls=False, errors='raise', dtype=pd.DataFrame, allowlist:list=None, trace_type:str=None) -> list:
     """ reads SEA-SigMF sensor data file(s) from the specified archive
 
-    If allowlist is None, then all files are read. For other arguments, see `read_sea_sigmf`.
+    Args:
+        allowlist: `None` to read all files, otherwise a list of file names to read inside of the zip file For other arguments, see `read_sea_sigmf`.
     """
-    def single_read(zfile, fn):
-        with zfile.open(fn) as fd:
-            sigmf = read_seamf(
-                fd,
-                force_loader_cls=force_loader_cls,
-                container_cls=dtype
-            )
 
-            if trace_type is not None:
-                return sigmf[trace_type]
-            else:
-                return sigmf
+    def single_read(zfile: MultiProcessingZipFile, fn):
+        try:
+            with zfile.open(fn) as fd:
+                sigmf = read_seamf(
+                    fd,
+                    force_loader_cls=force_loader_cls,
+                    container_cls=dtype
+                )
+
+                if trace_type is not None:
+                    return sigmf[trace_type]
+                else:
+                    return sigmf
+
+        except BaseException as ex:
+            if errors == 'raise':
+                raise
+            elif errors == 'log':
+                return sys.exc_info()
 
     if isinstance(zipfile_or_path, zipfile.ZipFile):
         # TODO: this will probably fail if zipfile_or_path was opened as anything
         # besides a path string
         zfile = MultiProcessingZipFile.from_zipfile(zipfile_or_path)
+        name = zipfile_or_path.filename
     elif isinstance(zipfile_or_path, (str, Path)):
         zfile = MultiProcessingZipFile(zipfile_or_path)
+        name = str(zipfile_or_path)
     elif isinstance(zipfile_or_path, MultiProcessingZipFile):
         zfile = MultiProcessingZipFile.from_mpzipfile(zipfile_or_path)
     else:
         raise TypeError(f'unsupported type {type(zipfile_or_path)} in argument "zipfile_or_path"')
 
+    if errors not in ('raise', 'log'):
+        raise ValueError('errors argument must be one of "raise" or "log"')
+
     with zfile:
         if allowlist is None:
             allowlist = zfile.namelist()
 
-        ret = [single_read(zfile, filename) for filename in allowlist]
+        log_info = dict(
+            name=zfile._zfile.filename,
+            file_first=allowlist[0] if len(allowlist)>0 else None,
+            file_last=allowlist[-1] if len(allowlist)>0 else None,
+            file_count=len(allowlist)
+        )
+
+        with start_action(action_type='read_seamf_zipfile', **log_info):
+            ret = [single_read(zfile, filename) for filename in allowlist]
+
+            if errors == 'log':
+                ret = [r for r in ret if isinstance(r, dict)]
+                exceptions = [(r,fn) for r,fn in zip(ret, allowlist) if isinstance(r, tuple)]
+
+                if len(ret) == 0:
+                    raise ValueError("no valid data in the partition")
+                
+                for (extype, exc, tb), fn in exceptions:
+                    log_message(
+                        'error',
+                        filename=fn,
+                        exception=extype.__name__,
+                        exception_str=', '.join(exc.args),
+                        traceback=format_tb(tb)
+                    )
 
     if trace_type is None:
-        return concat_dicts(*ret)
+        ret = concat_dicts(*ret)
     else:
-        return pd.concat(ret)
+        ret = pd.concat(ret)
 
+    return ret
 
 def _read_seamf_zipfile_divisions(zipfile_or_path, partition_size: int, file_list:list) -> list:
     """ reads SEA-SigMF sensor data file(s) from the specified archive
@@ -208,16 +253,16 @@ def _read_seamf_zipfile_divisions(zipfile_or_path, partition_size: int, file_lis
 
     with zfile:
         division_list = file_list[::partition_size]
-        if len(division_list) % partition_size != 0:
-            division_list.append(file_list[-1])
+        # if len(division_list) % partition_size != 0:
+        #     division_list.append(file_list[-1])
             
         dicts = [single_read(zfile, filename) for filename in division_list]
 
     starts = [
-        iso_to_datetime(d['captures'][0]['core:datetime'], 'America/New_York')
+        _iso_to_datetime(d['captures'][0]['core:datetime'], 'America/New_York')
         for d in dicts
     ]
 
-    starts.append(iso_to_datetime(dicts[-1]['captures'][-1]['core:datetime'], 'America/New_York'))
+    starts.append(_iso_to_datetime(dicts[-1]['captures'][-1]['core:datetime'], 'America/New_York'))
 
     return starts

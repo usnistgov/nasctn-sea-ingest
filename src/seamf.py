@@ -1,6 +1,6 @@
 import functools
 import pandas as pd
-import orjson
+import json
 from pathlib import Path
 from tarfile import TarFile
 import numpy as np
@@ -10,11 +10,11 @@ import methodtools
 from frozendict import frozendict
 import typing
 
-def cartesian_multiindex(i1: pd.MultiIndex, i2: pd.MultiIndex) -> pd.MultiIndex:
+def _cartesian_multiindex(i1: pd.MultiIndex, i2: pd.MultiIndex) -> pd.MultiIndex:
     """ combine two MultiIndex objects as a cartesian product.
      
     The result is equivalent to the index of a DataFrame produced by concatenating
-    a DataFrame with index i2 at each row in i1.
+    a DataFrame with index i2 at each row in i1, but this is faster
 
     """
     return pd.MultiIndex(
@@ -26,22 +26,16 @@ def cartesian_multiindex(i1: pd.MultiIndex, i2: pd.MultiIndex) -> pd.MultiIndex:
         names = i1.names + i2.names
     )
 
-def deepfreeze(obj):
-    """ recursively (dict -> frozendict, list -> tuple) to allow obj as a dictionary key """
-    if isinstance(obj, dict):
-        return frozendict({
-            k: deepfreeze(v)
-            for k,v in obj.items()
-        })
-    elif isinstance(obj, list):
-        return tuple(obj)
-    else:
-        return obj
-
-def iso_to_datetime(s, tz):
+def _iso_to_datetime(s, tz):
+    """ returns a naive datetime from a metadata timestamp string """
     # tz_localize(None) changes to "timezone-naive" timestamp, so you don't have to
     # specify timezone
-    return pd.to_datetime(s).tz_convert(tz).tz_localize(None)
+    return (
+        pd.Timestamp(np.datetime64(s[:-1]))
+        .tz_localize('utc')
+        .tz_convert('America/New_York')
+        .tz_localize(None)
+    )
 
 _TI = namedtuple('_TI', field_names=('type', 'metadata'))
 
@@ -50,44 +44,49 @@ class _LoaderBase:
         """ initialize the object to unpack numpy.ndarray or pandas.DataFrame objects """
         raise NotImplementedError
 
-    def _capture_index(self) -> pd.MultiIndex:
-        NAMES = 'datetime', 'frequency'
+    @staticmethod
+    def _capture_index(channel_metadata: dict) -> pd.MultiIndex:
+        """ returns a pd.MultiIndex containing datetime and frequency levels.
+
+        Args:
+            channel_metadata: mapping keyed on frequency; each entry is a dict that includes a 'datetime' key
+        """
 
         times, freqs = zip(*[
             [d['datetime'],k]
-            for k,d in self.meta['channel_metadata'].items()
+            for k,d in channel_metadata.items()
         ])
 
         return pd.MultiIndex(
             levels=(times, freqs),
-            codes=2*[range(len(self.meta['channel_metadata']))],
-            names=NAMES,
+            codes=2*[range(len(channel_metadata))],
+            names=('datetime', 'frequency'),
             sortorder=0
         )
 
-    @classmethod
-    @methodtools.lru_cache()
-    def _pfp_index(cls, pfp_sample_count: int, pvt_sample_count: int, iq_capture_duration_sec: float) -> pd.MultiIndex:
+    @staticmethod
+    @functools.lru_cache()
+    def _pfp_index(pfp_sample_count: int, pvt_sample_count: int, iq_capture_duration_sec: float) -> pd.MultiIndex:
         base = pd.RangeIndex(pfp_sample_count, name='Frame time elapsed (s)')
         return base * (iq_capture_duration_sec/pfp_sample_count/pvt_sample_count)
 
-    @classmethod
-    @methodtools.lru_cache()
-    def _pvt_index(cls, pvt_sample_count: int, iq_capture_duration_sec: float) -> pd.MultiIndex:
+    @staticmethod
+    @functools.lru_cache()
+    def _pvt_index(pvt_sample_count: int, iq_capture_duration_sec: float) -> pd.MultiIndex:
         base = pd.RangeIndex(pvt_sample_count, name='Capture time elapsed (s)')
         return base * (iq_capture_duration_sec/pvt_sample_count)
 
-    @classmethod
-    @methodtools.lru_cache() 
-    def _psd_index(cls, psd_sample_count, analysis_bandwidth_Hz) -> pd.MultiIndex:
+    @staticmethod
+    @functools.lru_cache() 
+    def _psd_index(psd_sample_count, analysis_bandwidth_Hz) -> pd.MultiIndex:
         # TODO: add analysis bandwidth to the metadata instead of hard-coding
 
         base = pd.RangeIndex(psd_sample_count, name='Baseband Frequency (Hz)')
         return base * (analysis_bandwidth_Hz/psd_sample_count)-analysis_bandwidth_Hz/2
 
-    @classmethod
-    @methodtools.lru_cache()
-    def _trace_index(cls, trace_dicts: typing.Tuple[frozendict]) -> pd.MultiIndex:
+    @staticmethod
+    @functools.lru_cache()
+    def _trace_index(trace_dicts: typing.Tuple[frozendict]) -> pd.MultiIndex:
         return pd.MultiIndex.from_frame(pd.DataFrame(trace_dicts))
 
     def unpack_arrays(self, data):
@@ -112,14 +111,15 @@ class _LoaderBase:
         trace_groups = self.unpack_arrays(data)
 
         # tabular data
-        capture_index = self._capture_index()
+        capture_index = self._capture_index(self.meta['channel_metadata'])
+
         frames = {}
         for name in trace_groups.keys():
             if name in self.TABULAR_GROUPS:
                 group_data = np.array(list(trace_groups[name].values())).swapaxes(0,1)
                 group_data = group_data.reshape((group_data.shape[0]*group_data.shape[1], group_data.shape[2]))
                 trace_index = self._trace_index(tuple(trace_groups[name].keys()))
-                index = cartesian_multiindex(capture_index, trace_index)
+                index = _cartesian_multiindex(capture_index, trace_index)
 
                 # take the column definition from the first trace key, under the assumption
                 # that they are the same for tabular data
@@ -138,9 +138,11 @@ class _LoaderBase:
         for v in self.meta['channel_metadata'].values():
             columns = v.keys()
             break
+
         channel_metadata = pd.DataFrame(values, index=capture_index, columns=columns)
-        if 'datetime' in columns:
-            channel_metadata.drop('datetime', axis=1, inplace=True)     
+        for col_name in ('datetime', 'frequency'):
+            if col_name in columns:
+                channel_metadata.drop(col_name, axis=1, inplace=True)     
 
         return dict(
             frames,
@@ -180,7 +182,7 @@ class _Loader_v1(_LoaderBase):
             sample_rate=sample_rate,
             version=json_meta['global']['core:version'],
             metadata_version='v0.1',
-            calibration_datetime=iso_to_datetime(json_meta['global']['ntia-sensor:calibration_datetime'],tz),
+            calibration_datetime=_iso_to_datetime(json_meta['global']['ntia-sensor:calibration_datetime'],tz),
             schedule_name=json_meta['global']['ntia-scos:schedule']['name'],
             schedule_start_datetime=json_meta['global']['ntia-scos:schedule']['start']
         )
@@ -203,7 +205,7 @@ class _Loader_v1(_LoaderBase):
                 frequency = capture['core:frequency']
                 channel_meta[frequency].update(
                     frequency=frequency,
-                    datetime=iso_to_datetime(capture['core:datetime'], tz),
+                    datetime=_iso_to_datetime(capture['core:datetime'], tz),
                     overload=annot['ntia-sensor:overload'],
                     sigan_attenuation_dB=annot['ntia-sensor:attenuation_setting_sigan']
                 )
@@ -283,12 +285,12 @@ class _Loader_v2(_LoaderBase):
             sample_rate=json_meta['global']['core:sample_rate'],
             version=json_meta['global']['core:version'],
             metadata_version=json_meta['global']['core:extensions']['ntia-nasctn-sea'],
-            calibration_datetime=iso_to_datetime(json_meta['global']['ntia-sensor:calibration_datetime'], tz),
+            calibration_datetime=_iso_to_datetime(json_meta['global']['ntia-sensor:calibration_datetime'], tz),
             schedule_name=json_meta['global']['ntia-scos:schedule']['name'],
-            schedule_start_datetime=iso_to_datetime(json_meta['global']['ntia-scos:schedule']['start'], tz),
+            schedule_start_datetime=_iso_to_datetime(json_meta['global']['ntia-scos:schedule']['start'], tz),
             schedule_interval=json_meta['global']['ntia-scos:schedule']['interval'],
             task=json_meta['global']['ntia-scos:task'],
-            diagnostics_datetime=iso_to_datetime(json_meta['global']['diagnostics']['diagnostics_datetime'], tz)
+            diagnostics_datetime=_iso_to_datetime(json_meta['global']['diagnostics']['diagnostics_datetime'], tz)
         )
 
         for v in json_meta['global']['diagnostics'].values():
@@ -304,7 +306,7 @@ class _Loader_v2(_LoaderBase):
                 elif k.endswith('sample_start') and not k.startswith('core:'):
                     pass
                 elif k == 'datetime':
-                    ts = iso_to_datetime(ts, tz)
+                    ts = _iso_to_datetime(ts, tz)
                     channel_meta[frequency][k.split(':',1)[-1]] = ts
                     continue
                 else:
@@ -380,8 +382,7 @@ class _Loader_v3(_LoaderBase):
     @functools.wraps(_LoaderBase.__init__)
     def __init__(self, json_meta, tz='America/New_York'):
         # get the vectors of offset indices of the each trace relative to the capture start
-        # (deepfreeze makes the lru_cache work by transforming to frozendict)
-        data_products = deepfreeze(json_meta['global']['data_products'])
+        data_products = json_meta['global']['data_products']
         trace_offsets, trace_labels = self._get_trace_metadata(data_products)
 
         # in v0.4 we can add apd here too
@@ -418,7 +419,7 @@ class _Loader_v3(_LoaderBase):
 
             frequency = capture.pop('core:frequency')
             sample_start = capture.pop('core:sample_start')
-            capture['datetime'] = iso_to_datetime(capture.pop('core:datetime'), tz)
+            capture['datetime'] = _iso_to_datetime(capture.pop('core:datetime'), tz)
 
             channel_meta[frequency] = capture
 
@@ -427,7 +428,8 @@ class _Loader_v3(_LoaderBase):
 
             # the following is a messy hack that can be removed in v0.4            
             trace_starts_keys.extend([sample_start+apd_start_offset, sample_start+apd_start_offset+apd_length])
-            trace_starts_values.extend(apd_trace_info)   
+            trace_starts_values.extend(apd_trace_info)
+
         self.trace_starts = dict(zip(trace_starts_keys, trace_starts_values))
 
         # slurp up the metadata
@@ -435,18 +437,17 @@ class _Loader_v3(_LoaderBase):
             sample_rate=json_meta['global']['core:sample_rate'],
             version=json_meta['global']['core:version'],
             metadata_version=json_meta['global']['core:extensions']['ntia-nasctn-sea'],
-            calibration_datetime=iso_to_datetime(json_meta['global']['ntia-sensor:calibration_datetime'], tz),
+            calibration_datetime=_iso_to_datetime(json_meta['global']['ntia-sensor:calibration_datetime'], tz),
             calibration_temperature_degC=json_meta['global']['calibration_temperature_degC'],
             schedule_name=json_meta['global']['ntia-scos:schedule']['name'],
-            schedule_start_datetime=iso_to_datetime(json_meta['global']['ntia-scos:schedule']['start'], tz),
+            schedule_start_datetime=_iso_to_datetime(json_meta['global']['ntia-scos:schedule']['start'], tz),
             schedule_interval=json_meta['global']['ntia-scos:schedule']['interval'],
             task=json_meta['global']['ntia-scos:task'],
-            diagnostics_datetime=iso_to_datetime(json_meta['global']['diagnostics']['diagnostics_datetime'], tz)
+            diagnostics_datetime=_iso_to_datetime(json_meta['global']['diagnostics']['diagnostics_datetime'], tz)
         )
         for v in json_meta['global']['diagnostics'].values():
             if isinstance(v, dict):
                 sweep_meta.update(v)
-            
 
         self.meta = dict(
             channel_metadata=channel_meta,
@@ -454,7 +455,7 @@ class _Loader_v3(_LoaderBase):
         )
 
 
-def get_loader(json_meta:dict):
+def _get_loader(json_meta:dict):
     """ return a loader object appropriate to the metadata version """
     if not hasattr(json_meta, 'keys') or not callable(json_meta.keys):
         raise ValueError('argument "meta" must be dict-like')
@@ -475,15 +476,22 @@ def get_loader(json_meta:dict):
     else:
         raise ValueError(f'unrecognized format version "{version}"')
 
+def _freeze_meta(pairs):
+    return frozendict([(k,tuple(v) if isinstance(v, list) else v) for k,v in pairs.items()])
 
-def read_seamf(file, force_loader_cls=False, container_cls=pd.DataFrame) -> dict:
+import hashlib
+
+def read_seamf(file, force_loader_cls=False, container_cls=pd.DataFrame, hash_check=True) -> dict:
     """ unpacks a sensor data file into a dictionary of numpy or pandas objects
 
     When `force_loader_cls` is False, the loader is selected automatically based on the
-    metadata version. Otherwise, it should be None (to return the raw metadata and a flat numpy data array)
-    or one of the _Loader_v* classes.
-    
+    metadata version. Other valid values are `None` (to return metadata dictionary and a flat numpy data array)
+    or `bytes` (for the metadata dictionary and data in bytes form) or one of the _Loader_v* classes.
+
     The supported types of container object are pandas.DataFrame and numpy.ndarray.
+
+    When hash_check evaluates as True, the data contents are compared against the SHA512 hash
+    in the metadata file.
     """
     if isinstance(file, (str, Path)):
         kws = {'name': file}
@@ -495,25 +503,33 @@ def read_seamf(file, force_loader_cls=False, container_cls=pd.DataFrame) -> dict
 
         # meta is plain json
         meta_name = '/'.join((name, name+'.sigmf-meta'))
-        meta = orjson.loads(tar_fd.extractfile(meta_name).read())
+        meta = json.loads(tar_fd.extractfile(meta_name).read(), object_hook=_freeze_meta)
 
         data_name = '/'.join((name, name+'.sigmf-data'))
         lzma_data = tar_fd.extractfile(data_name).read()
 
+    # hash check
+    data_hash = hashlib.sha512(lzma_data).hexdigest()
+    if data_hash != meta['global']['core:sha512']:
+        raise IOError('seamf file data failed sha512 hash check')
+
     # the duration of this operation is dominated by lzma.decompress, not disk access or numpy
     # (on a 2020-vintage laptop with an SSD)
-    data = np.frombuffer(lzma.decompress(lzma_data), dtype='half')
+    byte_data = lzma.decompress(lzma_data)
+    if isinstance(force_loader_cls, type) and issubclass(force_loader_cls, bytes):
+        return byte_data, meta
+
+    data = np.frombuffer(byte_data, dtype='half')
 
     # pick the loader
     if force_loader_cls is None:
         return data, meta
     elif force_loader_cls == False:
-        loader = get_loader(meta)
+        loader = _get_loader(meta)
     elif isinstance(force_loader_cls, type) and issubclass(force_loader_cls, _LoaderBase):
         loader = force_loader_cls(meta)
     else:
         raise TypeError(f"unsupported type '{type(force_loader_cls)}' for argument force_loader_cls")
-
 
     # unpack the data
     if issubclass(container_cls, pd.DataFrame):
@@ -523,7 +539,7 @@ def read_seamf(file, force_loader_cls=False, container_cls=pd.DataFrame) -> dict
     else:
         raise TypeError('invalid "container_cls"')
 
-def read_seamf_meta(file):
+def read_seamf_meta(file, func=None):
     if isinstance(file, (str, Path)):
         kws = {'name': file}
     else:
@@ -534,6 +550,6 @@ def read_seamf_meta(file):
 
         # meta is plain json
         meta_name = '/'.join((name, name+'.sigmf-meta'))
-        meta = orjson.loads(tar_fd.extractfile(meta_name).read())
+        meta = json.loads(tar_fd.extractfile(meta_name).read(), object_hook=_freeze_meta)
 
     return meta

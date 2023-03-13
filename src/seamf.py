@@ -10,6 +10,35 @@ import methodtools
 from frozendict import frozendict
 import typing
 
+
+def trace(dfs: dict, type: str, *columns: str, **inds) -> pd.DataFrame:
+    """ indexing shortcut for dictionaries of SEA pd.DataFrame data tables.
+
+    Args:
+        dfs: a dictionary of pandas DataFrame objects
+        type: table name key (e.g., 'pfp', 'psd', 'channel_metadata', etc.)
+        columns: if specified, the sequence of columns to select (otherwise all)
+        inds: the index value to select, keyed on the label name
+    """
+    ret = dfs[type]
+
+    if len(inds) > 0:
+        ret = ret.xs(
+            key=tuple(inds.values()),
+            level=tuple(inds.keys()),
+            drop_level=True
+        )
+
+    if len(columns) > 1:
+        ret = ret[list(columns)]
+    if len(columns) == 1:
+        # this is actually a bit dicey, as it forces returning a series.
+        # you might deliberately want to pass in a length-1 list to force
+        # dataframe?
+        ret = ret[columns[0]]
+
+    return ret
+
 def _cartesian_multiindex(i1: pd.MultiIndex, i2: pd.MultiIndex) -> pd.MultiIndex:
     """ combine two MultiIndex objects as a cartesian product.
      

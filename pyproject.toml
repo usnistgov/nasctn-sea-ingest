@@ -2,10 +2,9 @@
 [tool.pdm]
 [tool.pdm.dev-dependencies]
 dev = [
-    "labbench>=0.23.4",
-    "matplotlib>=3.7.0",
     "jupyter>=1.0.0",
     "black>=23.1.0",
+    "labbench>=0.23.4",
 ]
 
 [project]
@@ -23,16 +22,13 @@ dependencies = [
     "frozendict>=2.3.4",
     "quickle>=0.4.0",
     "natsort>=8.2.0",
-    "matplotlib>=3.7.0",
-    "matplotlib-inline>=0.1.6",
     "msgpack>=1.0.4",
     "bokeh~=2.4",
     "eliot>=1.14.0",
-    "loguru>=0.6.0",
     "distributed>=2023.2.1",
     "dask[complete]>=2023.3.0",
     "lz4>=4.3.2",
-    "viztracer>=0.15.6",
+    "matplotlib<3.7,>=3.6",
 ]
 requires-python = ">=3.8"
 license = {file = "LICENSE.md"}

@@ -361,6 +361,16 @@ def read_seamf_zipfile(zipfile_or_path, allowlist:list=None, errors='raise') -> 
 
     return ret
 
+def restore_multiindex(dfs: typing.Dict[str, pd.DataFrame]):
+    for name in dfs.keys():
+        if isinstance(dfs[name].columns.values[-1], str):
+            if dfs[name].columns[0] == 'frequency':
+                dfs[name].set_index('frequency', append=True, inplace=True)
+            continue
+
+        ind_names = [n for n in dfs[name].columns if isinstance(n, str)]
+        dfs[name].set_index(ind_names, append=True, inplace=True)
+
 def _read_seamf_zipfile_divisions(zipfile_or_path, partition_size: int, file_list:list) -> list:
     """ reads SEA-SigMF sensor data file(s) from the specified archive
 

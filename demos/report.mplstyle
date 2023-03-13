@@ -1,0 +1,63 @@
+# Match all text to the Times New Roman (size 10) used in document text
+font.size: 10
+font.family: "serif"
+font.serif: "Times New Roman"
+axes.formatter.use_mathtext: True
+axes.labelsize: 10
+axes.titlesize: 10
+figure.titlesize: 10
+figure.labelsize: 10
+legend.fontsize: 10
+legend.title_fontsize: 10
+xtick.labelsize: 10
+ytick.labelsize: 10
+mathtext.fontset: "custom"
+mathtext.it: "serif:italic"
+mathtext.rm: "serif:normal"
+mathtext.bf: "serif:bold"
+mathtext.default: "it"
+
+# the following were tuned to some sense of "good proportion" with the font size
+xtick.major.size: 5
+xtick.minor.size: 2.5
+xtick.major.pad: 1.75
+xtick.minor.pad: 1.75
+ytick.major.size: 5
+ytick.minor.size: 2.5
+ytick.major.pad: 1.75
+ytick.minor.pad: 1.75
+
+# Use use a limited number of colors selected for limited color vision from the seaborn 'colorblind' palette
+axes.prop_cycle: cycler('color',['0173b2', 'de8f05', '029e73', 'd55e00', 'cc78bc', 'ca9161', 'fbafe4'])
+axes.grid: True
+grid.linestyle: ":"
+lines.linewidth : 1
+lines.markersize : 5
+
+# Match the 3.5" IEEE column width. Height can be adjusted freely.
+figure.figsize: 6.5,3.5
+
+# The following applies mostly to layout of subplots. The "constrained_layout" engine results
+# seems like a good first pass for tight figures
+figure.constrained_layout.use: True
+figure.constrained_layout.h_pad: 0.03 # avoids slight clipping on the axes border box
+figure.constrained_layout.w_pad: 0.03 # avoids slight clipping on the axes border box
+figure.constrained_layout.hspace: 0.0
+figure.constrained_layout.wspace: 0.0
+
+# tight legend based on the font and figure size
+legend.handletextpad: 0.2
+legend.labelspacing: 0.005
+legend.borderaxespad: 0.0
+legend.columnspacing: 0.5
+legend.handlelength: 1.
+legend.edgecolor: "black"
+legend.framealpha: 1
+legend.borderpad: 0.25
+legend.fancybox: False # keep the sharp corners, matching the axis lines
+
+# export without the white background box at high default resolution
+savefig.pad_inches: 0.005
+savefig.facecolor: "none"
+savefig.dpi: 300
+savefig.bbox: "tight"

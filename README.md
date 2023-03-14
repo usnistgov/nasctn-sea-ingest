@@ -1,6 +1,6 @@
 # NASCTN SEA Ingest
 
-This repository is focused on aggregation of "seamf" SEA sensor output data files.
+This repository is focused on fast and convenient loading of many "seamf" SEA sensor output data files. The data products and metadata are packaged into pandas or dask DataFrame objects. From there, the data can be analyzed directly, or the data can be piped into files or databases using dask multiprocessing hooks.
 
 See also:
 - [sea-data-product](https://github.com/NTIA/sea-data-product): the latest usage and clear reference implementation for reading the seamf data format

@@ -208,7 +208,7 @@ def read_seamf_zipfile_as_delayed(data_path, partition_func: typing.Callable=Non
 
     @dask.delayed
     def read_partition(files: list, errors='log'):
-        ret = read_seamf_zipfile(zfile, allowlist=files, errors=errors)
+        ret = read_seamf_zipfile(zfile, allow=files, errors=errors)
         if partition_func is not None and ret is not None:
             ret = partition_func(ret)
             if not isinstance(ret, dict):
@@ -293,11 +293,15 @@ def read_seamf_zipfile_as_ddf(data_path, partition_func=None, limit_count: int=N
     return ddfs
 
 
-def read_seamf_zipfile(zipfile_or_path, allowlist:list=None, errors='raise') -> list:
-    """ reads SEA-SigMF sensor data file(s) from the specified archive
+def read_seamf_zipfile(zipfile_or_path, allow:list=None, errors='raise') -> typing.Dict[str, pd.DataFrame]:
+    """ reads SEA-SigMF sensor data file(s) from the specified archive.
 
     Args:
-        allowlist: `None` to read all files, otherwise a list of file names to read inside of the zip file For other arguments, see `read_sea_sigmf`.
+        allow: `None` to read all files, an integer to read a fixed number of sweeps, or an explicit list of file names
+        errors: 'raise' to raise exceptions, or 'log' to swallow each exception in `read_seamf` and write to log
+
+    Returns:
+        a dictionary of pandas dataframes, keyed by name of the data product or metadata
     """
 
     kws = locals()
@@ -328,22 +332,24 @@ def read_seamf_zipfile(zipfile_or_path, allowlist:list=None, errors='raise') -> 
         raise ValueError('errors argument must be one of "raise" or "log"')
 
     with zfile:
-        if allowlist is None:
-            allowlist = zfile.namelist()
+        if allow is None:
+            allow = [n for n in zfile.namelist() if n.endswith('.sigmf')]
+        elif isinstance(allow, int):
+            allow = [n for n in zfile.namelist() if n.endswith('.sigmf')][1:1+allow]
 
         log_info = dict(
             name=zfile._zfile.filename,
-            file_first=allowlist[0] if len(allowlist)>0 else None,
-            file_last=allowlist[-1] if len(allowlist)>0 else None,
-            file_count=len(allowlist)
+            file_first=allow[0] if len(allow)>0 else None,
+            file_last=allow[-1] if len(allow)>0 else None,
+            file_count=len(allow)
         )
 
         with start_action(action_type='read_seamf_zipfile', **log_info):
-            ret = [single_read(zfile, filename) for filename in allowlist]
+            ret = [single_read(zfile, filename) for filename in allow]
 
             if errors == 'log':
                 ret = [r for r in ret if isinstance(r, dict)]
-                exceptions = [(r,fn) for r,fn in zip(ret, allowlist) if isinstance(r, tuple)]
+                exceptions = [(r,fn) for r,fn in zip(ret, allow) if isinstance(r, tuple)]
 
                 if len(ret) == 0:
                     raise ValueError("no valid data in the partition")
@@ -374,7 +380,7 @@ def restore_multiindex(dfs: typing.Dict[str, pd.DataFrame]):
 def _read_seamf_zipfile_divisions(zipfile_or_path, partition_size: int, file_list:list) -> list:
     """ reads SEA-SigMF sensor data file(s) from the specified archive
 
-    If allowlist is None, then all files are read. For other arguments, see `read_sea_sigmf`.
+    If allow is None, then all files are read. For other arguments, see `read_sea_sigmf`.
     """
     def single_read(zfile, fn):
         with zfile.open(fn) as fd:

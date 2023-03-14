@@ -1,5 +1,5 @@
 import quickle
-import zipfile#from zipfile import ZipFile, ZipInfo
+import zipfile  # from zipfile import ZipFile, ZipInfo
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -21,8 +21,9 @@ try:
 except ImportError:
     from seamf import read_seamf, read_seamf_meta, _iso_to_datetime
 
+
 class QuackZipInfo(quickle.Struct):
-    """ duck-typed ZipInfo clone for fast IPC serialized with quickle """
+    """duck-typed ZipInfo clone for fast IPC serialized with quickle"""
 
     orig_filename: str
     filename: str
@@ -60,7 +61,7 @@ class QuackZipInfo(quickle.Struct):
     def from_filelist(cls, filelist):
         return [cls.from_zipinfo(zinfo) for zinfo in filelist]
 
-    
+
 class CachedZipFile(zipfile.ZipFile):
     _encoder = quickle.Encoder(registry=[QuackZipInfo])
     _decoder = quickle.Decoder(registry=[QuackZipInfo])
@@ -70,13 +71,14 @@ class CachedZipFile(zipfile.ZipFile):
         super().__init__(*args, **kws)
 
     def _RealGetContents(self):
-        """ monkeypatched: not so 'real' any more :) """
+        """monkeypatched: not so 'real' any more :)"""
         cache = self._decoder.loads(self.cache)
-        for k,v in cache.items():
+        for k, v in cache.items():
             setattr(self, k, v)
 
+
 class MultiProcessingZipFile:
-    """ Serializable ZipFile wrapper for fast IPC.
+    """Serializable ZipFile wrapper for fast IPC.
 
     It remains closed unless a context is opened. While open, the
     object is not serializable.
@@ -85,20 +87,22 @@ class MultiProcessingZipFile:
     def __init__(self, *args, **kws):
         self._zfile = None
 
-        self.cache = kws.pop('cache', None)
+        self.cache = kws.pop("cache", None)
 
         if self.cache is None:
             # do a one-time cache using the file scan done by ZipFile .__init__
             zfile = zipfile.ZipFile(*args, **kws)
             filelist = QuackZipInfo.from_filelist(zfile.filelist)
             NameToInfo = dict(zip(zfile.NameToInfo.keys(), filelist))
-            self.cache = CachedZipFile._encoder.dumps(dict(
-                filename=zfile.filename,
-                _comment=zfile._comment,
-                start_dir=zfile.start_dir,
-                filelist=filelist,
-                NameToInfo=NameToInfo,
-            ))
+            self.cache = CachedZipFile._encoder.dumps(
+                dict(
+                    filename=zfile.filename,
+                    _comment=zfile._comment,
+                    start_dir=zfile.start_dir,
+                    filelist=filelist,
+                    NameToInfo=NameToInfo,
+                )
+            )
             self._names = [f.filename for f in filelist]
             zfile.close()
 
@@ -108,7 +112,7 @@ class MultiProcessingZipFile:
 
     def namelist(self, sort=True):
         if self._zfile is None:
-            raise IOError('need to open context first')
+            raise IOError("need to open context first")
         ret = self._names
         if sort:
             ret = natsorted(ret)
@@ -122,17 +126,17 @@ class MultiProcessingZipFile:
             compression=zfile.compression,
             compresslevel=zfile.compresslevel,
             strict_timestamps=zfile._strict_timestamps,
-            allowZip64=zfile._allowZip64
+            allowZip64=zfile._allowZip64,
         )
         return cls(**kws)
-    
+
     @classmethod
     def from_mpzipfile(cls, zfile):
         return cls(cache=zfile.cache, *zfile.args, **zfile.kws)
 
     def open(self, fn):
         if self._zfile is None:
-            raise IOError('open a zipfile context first')
+            raise IOError("open a zipfile context first")
         return self._zfile.open(fn)
 
     def __enter__(self):
@@ -144,10 +148,10 @@ class MultiProcessingZipFile:
 
 
 def concat_dicts(*dicts):
-    """ concats dictionaries of dataframes by key """
-    if len(dicts)==1:
+    """concats dictionaries of dataframes by key"""
+    if len(dicts) == 1:
         return dicts[0]
-    elif len(dicts)==0:
+    elif len(dicts) == 0:
         return None
 
     return {
@@ -156,9 +160,16 @@ def concat_dicts(*dicts):
         if isinstance(dicts[0][k], pd.DataFrame)
     }
 
+
 @log_call(include_result=False)
-def read_seamf_zipfile_as_delayed(data_path, partition_func: typing.Callable=None, limit_count: int=None, partition_size:int=40, dataframe_info:bool=False) -> typing.List[dask.delayed]:
-    """ scan the zip file archive(s) at `data_path` and return a list of dask.delayed objects.
+def read_seamf_zipfile_as_delayed(
+    data_path,
+    partition_func: typing.Callable = None,
+    limit_count: int = None,
+    partition_size: int = 40,
+    dataframe_info: bool = False,
+) -> typing.List[dask.delayed]:
+    """scan the zip file archive(s) at `data_path` and return a list of dask.delayed objects.
 
     Each object corresponds to a data partition comprising `partition_size` files.
 
@@ -174,7 +185,7 @@ def read_seamf_zipfile_as_delayed(data_path, partition_func: typing.Callable=Non
         data_path: path to a zipfile to load, or a tuple or list of zipfiles to aggregate
         partition_func: callable used to process partition data returned by `read_seamf_zipfile`
         partition_size: the number of SEAMF files to pack in each partition
-        limit_count: `None` to load all files, otherwise a limit to the number of files to load 
+        limit_count: `None` to load all files, otherwise a limit to the number of files to load
 
     """
     if isinstance(data_path, (list, tuple)):
@@ -191,9 +202,9 @@ def read_seamf_zipfile_as_delayed(data_path, partition_func: typing.Callable=Non
             for this_data, this_df_info in rets:
                 partition_data += this_data
 
-                for k,v in this_df_info.items():
-                    df_info.setdefault(k, {}).setdefault('meta', []).extend(v['meta'])
-                    df_info[k].setdefault('divisions', []).extend(v['divisions'])
+                for k, v in this_df_info.items():
+                    df_info.setdefault(k, {}).setdefault("meta", []).extend(v["meta"])
+                    df_info[k].setdefault("divisions", []).extend(v["divisions"])
 
             return partition_data, df_info
         else:
@@ -203,16 +214,16 @@ def read_seamf_zipfile_as_delayed(data_path, partition_func: typing.Callable=Non
     # we do that once for the scan; everything else is cached
     zfile = MultiProcessingZipFile(data_path)
     with zfile:
-        filelist = [n for n in zfile.namelist() if n.endswith('.sigmf')][:limit_count]
-    file_blocks = np.split(filelist, range(0,len(filelist), partition_size))[1:]
+        filelist = [n for n in zfile.namelist() if n.endswith(".sigmf")][:limit_count]
+    file_blocks = np.split(filelist, range(0, len(filelist), partition_size))[1:]
 
     @dask.delayed
-    def read_partition(files: list, errors='log'):
+    def read_partition(files: list, errors="log"):
         ret = read_seamf_zipfile(zfile, allow=files, errors=errors)
         if partition_func is not None and ret is not None:
             ret = partition_func(ret)
             if not isinstance(ret, dict):
-                raise ValueError('partition_func must return a dict')
+                raise ValueError("partition_func must return a dict")
         return ret
 
     # generate the tuple of delayed objects for reading each partition
@@ -223,7 +234,9 @@ def read_seamf_zipfile_as_delayed(data_path, partition_func: typing.Callable=Non
         last_ex = None
         for filename in file_blocks[0]:
             try:
-                stub_data = read_partition([filename], errors='raise').compute(scheduler='synchronous')
+                stub_data = read_partition([filename], errors="raise").compute(
+                    scheduler="synchronous"
+                )
             except BaseException as ex:
                 last_ex = ex
                 continue
@@ -231,7 +244,9 @@ def read_seamf_zipfile_as_delayed(data_path, partition_func: typing.Callable=Non
                 if stub_data is not None:
                     break
         else:
-            raise ValueError("couldn't read any files from the first partition") from last_ex
+            raise ValueError(
+                "couldn't read any files from the first partition"
+            ) from last_ex
 
         # these work as a-priori column stubs that dask DataFrames use to speed up concat operations
         meta_map = {
@@ -244,16 +259,18 @@ def read_seamf_zipfile_as_delayed(data_path, partition_func: typing.Callable=Non
         divisions = _read_seamf_zipfile_divisions(zfile, partition_size, filelist)
 
         df_info = {
-            k: dict(meta=meta_map[k], divisions=divisions)
-            for k in meta_map.keys()
+            k: dict(meta=meta_map[k], divisions=divisions) for k in meta_map.keys()
         }
 
         return partition_data, df_info
     else:
         return partition_data
 
-def read_seamf_zipfile_as_ddf(data_path, partition_func=None, limit_count: int=None, partition_size=40) -> typing.Dict[str, dask.dataframe.DataFrame]:
-    """ scans the file(s) specified by data_path, returning a dictionary of dask DataFrame objects for setting up operations.
+
+def read_seamf_zipfile_as_ddf(
+    data_path, partition_func=None, limit_count: int = None, partition_size=40
+) -> typing.Dict[str, dask.dataframe.DataFrame]:
+    """scans the file(s) specified by data_path, returning a dictionary of dask DataFrame objects for setting up operations.
 
     The returned dask dataframes are repartitioned to 1-day blocks.
 
@@ -261,8 +278,10 @@ def read_seamf_zipfile_as_ddf(data_path, partition_func=None, limit_count: int=N
         see `zipfile_delayed`
     """
 
-    # passthrough first before other variables enter the local namespace 
-    partition_data, df_info = read_seamf_zipfile_as_delayed(**locals(), dataframe_info=True)
+    # passthrough first before other variables enter the local namespace
+    partition_data, df_info = read_seamf_zipfile_as_delayed(
+        **locals(), dataframe_info=True
+    )
 
     @dask.delayed
     def select_data_product(partition_data: dict, key: str) -> pd.DataFrame:
@@ -271,30 +290,28 @@ def read_seamf_zipfile_as_ddf(data_path, partition_func=None, limit_count: int=N
         return multiindex_to_index(partition_data[key])
 
     ddfs = {}
-    for key in df_info.keys(): # 'sweep_metadata', 
-        if key == 'sweep_metadata':
+    for key in df_info.keys():  # 'sweep_metadata',
+        if key == "sweep_metadata":
             # TODO: achieve timestamp indexing in seamf.py so we can get rid of this
             # hard-coded special case
             continue
 
-        # make delayed objects for this specific key 
+        # make delayed objects for this specific key
         delayed_list = [
-            select_data_product(d, key)
-            for d in partition_data
-            if d is not None
+            select_data_product(d, key) for d in partition_data if d is not None
         ]
 
-        ddfs[key] = (
-            dataframe
-            .from_delayed(delayed_list, **df_info[key])
-            .repartition(freq='1D')
+        ddfs[key] = dataframe.from_delayed(delayed_list, **df_info[key]).repartition(
+            freq="1D"
         )
 
     return ddfs
 
 
-def read_seamf_zipfile(zipfile_or_path, allow:list=None, errors='raise') -> typing.Dict[str, pd.DataFrame]:
-    """ reads SEA-SigMF sensor data file(s) from the specified archive.
+def read_seamf_zipfile(
+    zipfile_or_path, allow: list = None, errors="raise"
+) -> typing.Dict[str, pd.DataFrame]:
+    """reads SEA-SigMF sensor data file(s) from the specified archive.
 
     Args:
         allow: `None` to read all files, an integer to read a fixed number of sweeps, or an explicit list of file names
@@ -312,9 +329,9 @@ def read_seamf_zipfile(zipfile_or_path, allow:list=None, errors='raise') -> typi
                 return read_seamf(fd)
 
         except BaseException as ex:
-            if errors == 'raise':
+            if errors == "raise":
                 raise
-            elif errors == 'log':
+            elif errors == "log":
                 return sys.exc_info()
 
     if isinstance(zipfile_or_path, zipfile.ZipFile):
@@ -326,62 +343,71 @@ def read_seamf_zipfile(zipfile_or_path, allow:list=None, errors='raise') -> typi
     elif isinstance(zipfile_or_path, MultiProcessingZipFile):
         zfile = MultiProcessingZipFile.from_mpzipfile(zipfile_or_path)
     else:
-        raise TypeError(f'unsupported type {type(zipfile_or_path)} in argument "zipfile_or_path"')
+        raise TypeError(
+            f'unsupported type {type(zipfile_or_path)} in argument "zipfile_or_path"'
+        )
 
-    if errors not in ('raise', 'log'):
+    if errors not in ("raise", "log"):
         raise ValueError('errors argument must be one of "raise" or "log"')
 
     with zfile:
         if allow is None:
-            allow = [n for n in zfile.namelist() if n.endswith('.sigmf')]
+            allow = [n for n in zfile.namelist() if n.endswith(".sigmf")]
         elif isinstance(allow, int):
-            allow = [n for n in zfile.namelist() if n.endswith('.sigmf')][1:1+allow]
+            allow = [n for n in zfile.namelist() if n.endswith(".sigmf")][1 : 1 + allow]
 
         log_info = dict(
             name=zfile._zfile.filename,
-            file_first=allow[0] if len(allow)>0 else None,
-            file_last=allow[-1] if len(allow)>0 else None,
-            file_count=len(allow)
+            file_first=allow[0] if len(allow) > 0 else None,
+            file_last=allow[-1] if len(allow) > 0 else None,
+            file_count=len(allow),
         )
 
-        with start_action(action_type='read_seamf_zipfile', **log_info):
+        with start_action(action_type="read_seamf_zipfile", **log_info):
             ret = [single_read(zfile, filename) for filename in allow]
 
-            if errors == 'log':
+            if errors == "log":
                 ret = [r for r in ret if isinstance(r, dict)]
-                exceptions = [(r,fn) for r,fn in zip(ret, allow) if isinstance(r, tuple)]
+                exceptions = [
+                    (r, fn) for r, fn in zip(ret, allow) if isinstance(r, tuple)
+                ]
 
                 if len(ret) == 0:
                     raise ValueError("no valid data in the partition")
-                
+
                 for (extype, exc, tb), fn in exceptions:
                     log_message(
-                        'error',
+                        "error",
                         filename=fn,
                         exception=extype.__name__,
-                        exception_str=', '.join(exc.args),
-                        traceback=format_tb(tb)
+                        exception_str=", ".join(exc.args),
+                        traceback=format_tb(tb),
                     )
 
     ret = concat_dicts(*ret)
 
     return ret
 
+
 def restore_multiindex(dfs: typing.Dict[str, pd.DataFrame]):
     for name in dfs.keys():
         if isinstance(dfs[name].columns.values[-1], str):
-            if dfs[name].columns[0] == 'frequency':
-                dfs[name].set_index('frequency', append=True, inplace=True)
+            if dfs[name].columns[0] == "frequency":
+                dfs[name].set_index("frequency", append=True, inplace=True)
             continue
 
         ind_names = [n for n in dfs[name].columns if isinstance(n, str)]
         dfs[name].set_index(ind_names, append=True, inplace=True)
 
-def _read_seamf_zipfile_divisions(zipfile_or_path, partition_size: int, file_list:list) -> list:
-    """ reads SEA-SigMF sensor data file(s) from the specified archive
+
+def _read_seamf_zipfile_divisions(
+    zipfile_or_path, partition_size: int, file_list: list
+) -> list:
+    """reads SEA-SigMF sensor data file(s) from the specified archive
 
     If allow is None, then all files are read. For other arguments, see `read_sea_sigmf`.
     """
+
     def single_read(zfile, fn):
         with zfile.open(fn) as fd:
             return read_seamf_meta(fd)
@@ -395,20 +421,24 @@ def _read_seamf_zipfile_divisions(zipfile_or_path, partition_size: int, file_lis
     elif isinstance(zipfile_or_path, MultiProcessingZipFile):
         zfile = MultiProcessingZipFile.from_mpzipfile(zipfile_or_path)
     else:
-        raise TypeError(f'unsupported type {type(zipfile_or_path)} in argument "zipfile_or_path"')
+        raise TypeError(
+            f'unsupported type {type(zipfile_or_path)} in argument "zipfile_or_path"'
+        )
 
     with zfile:
         division_list = file_list[::partition_size]
         # if len(division_list) % partition_size != 0:
         #     division_list.append(file_list[-1])
-            
+
         dicts = [single_read(zfile, filename) for filename in division_list]
 
     starts = [
-        _iso_to_datetime(d['captures'][0]['core:datetime'], 'America/New_York')
+        _iso_to_datetime(d["captures"][0]["core:datetime"], "America/New_York")
         for d in dicts
     ]
 
-    starts.append(_iso_to_datetime(dicts[-1]['captures'][-1]['core:datetime'], 'America/New_York'))
+    starts.append(
+        _iso_to_datetime(dicts[-1]["captures"][-1]["core:datetime"], "America/New_York")
+    )
 
     return starts

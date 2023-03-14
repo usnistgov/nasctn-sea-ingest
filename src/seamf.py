@@ -11,7 +11,7 @@ from frozendict import frozendict
 import typing
 
 
-def trace(dfs: dict, type: str, *columns: str, **inds) -> pd.DataFrame:
+def trace(dfs: dict, type: str = None, *columns: str, **inds) -> pd.DataFrame:
     """ indexing shortcut for dictionaries of SEA pd.DataFrame data tables.
 
     Args:
@@ -20,7 +20,12 @@ def trace(dfs: dict, type: str, *columns: str, **inds) -> pd.DataFrame:
         columns: if specified, the sequence of columns to select (otherwise all)
         inds: the index value to select, keyed on the label name
     """
-    ret = dfs[type]
+    if isinstance(dfs, dict):
+        if type is None:
+            raise ValueError('when "dfs" is a dictionary of dataframes, must pass a string key to select a dataframe')
+        ret = dfs[type]
+    else:
+        ret = dfs
 
     if len(inds) > 0:
         ret = ret.xs(

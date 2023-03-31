@@ -5,10 +5,12 @@ from pathlib import Path
 from tarfile import TarFile
 import numpy as np
 import lzma
+import hashlib
 from collections import defaultdict, namedtuple
 import methodtools
 from frozendict import frozendict
 import typing
+from timezonefinder import TimezoneFinder
 
 
 def trace(dfs: dict, type: str = None, *columns: str, **inds) -> pd.DataFrame:
@@ -62,20 +64,18 @@ def _cartesian_multiindex(i1: pd.MultiIndex, i2: pd.MultiIndex) -> pd.MultiIndex
     )
 
 
-def _iso_to_datetime(s, tz):
-    """returns a naive datetime from a metadata timestamp string"""
-    # tz_localize(None) changes to "timezone-naive" timestamp, so you don't have to
-    # specify timezone
+def _iso_to_datetime(s, tz: str="America/New_York"):
+    """returns a timezone aware datetime from a metadata timestamp string"""
     return (
         pd.Timestamp(np.datetime64(s[:-1]))
         .tz_localize("utc")
-        .tz_convert("America/New_York")
-        .tz_localize(None)
+        .tz_convert(tz)
     )
 
 
 _TI = namedtuple("_TI", field_names=("type", "metadata"))
 
+_TzFinder = TimezoneFinder()
 
 class _LoaderBase:
     def __init__(self, json_meta: dict, tz="America/New_York"):
@@ -133,7 +133,6 @@ class _LoaderBase:
 
     def unpack_arrays(self, data):
         """split the flat data vector into a dictionary of named traces"""
-        # TODO: support for validating data with the SHA string from metadata
         split_inds = list(self.trace_starts.keys())[1:]
         traces = np.split(data, split_inds)
 
@@ -537,6 +536,154 @@ class _Loader_v3(_LoaderBase):
         self.meta = dict(channel_metadata=channel_meta, sweep_metadata=sweep_meta)
 
 
+class _Loader_v4(_LoaderBase):
+    TABULAR_GROUPS = dict(
+        psd="power_spectral_density",
+        pvt="time_series_power",
+        pfp="periodic_frame_power",
+        apd="amplitude_probability_distribution",
+    )
+
+    CAPTURE_KEYMAP = {
+        "ntia-sensor:overload": "overload",
+        "ntia-sensor:duration": "iq_capture_duration_ms",
+        "noise_figure": "cal_noise_figure_dB",
+        "gain": "cal_gain_dB",
+        "temperature": "cal_temperature_degC",
+        "reference_level": "sigan_reference_level_dBm",
+        "attenuation": "sigan_attenuation_dB",
+        "preamp_enable": "sigan_preamp_enable",
+    }
+    
+    @classmethod
+    @methodtools.lru_cache()
+    def _get_trace_metadata(cls, data_products: frozendict):
+        # this is cached since we expect data_products not to change very often
+        offset_total = 0
+        trace_offsets = []
+        trace_labels = []
+        for short_name, json_name in cls.TABULAR_GROUPS.items():
+            dp_field = data_products[json_name]
+            for trace_obj in dp_field.get("traces", [{"detector": "apd_temp"}]):
+                # APD has no trace object; temporarily populate trace_labels
+                # This is later removed in unpack_dataframes or unpack_arrays
+                trace_offsets.append(offset_total)
+                trace_labels.append(_TI(short_name, frozendict(trace_obj)))
+                offset_total += dp_field["length"]
+
+        cls._trace_offsets = dict(zip(trace_offsets, trace_labels))
+
+        return np.array(trace_offsets), trace_labels
+    
+    @staticmethod
+    @functools.lru_cache()
+    def _apd_index(apd_min_bin_dBm, apd_max_bin_dBm, apd_bin_size_dB) -> pd.MultiIndex:
+        return pd.RangeIndex(
+            start=apd_min_bin_dBm,
+            stop=apd_max_bin_dBm+apd_bin_size_dB,
+            step=apd_bin_size_dB,
+            name="Channel Power (dBm/10MHz)"
+        )
+
+    
+    @functools.wraps(_LoaderBase.__init__)
+    def __init__(self, json_meta, tz=None):
+        # get timezone from sensor location
+        if tz is None:
+            # Overriden if tz is specified on init
+            loc = json_meta["global"]["core:geolocation"]["coordinates"]
+            tz = _TzFinder.unique_timezone_at(lng=loc[0], lat=loc[1])
+        
+        # get the vectors of offset indices of the each trace relative to the capture start
+        data_products = json_meta["global"]["ntia-algorithm:data_products"]
+        trace_offsets, trace_labels = self._get_trace_metadata(data_products)
+
+        self.trace_axes = {}
+        sample_rate = json_meta["global"]["core:sample_rate"]
+        # (safely) assume all capture durations are identical
+        capture_duration = json_meta["captures"][0]["ntia-sensor:duration"] / 1000.
+        
+        self.trace_axes["pfp"] = self._pfp_index(
+            data_products["periodic_frame_power"]["length"],
+            data_products["time_series_power"]["length"],
+            capture_duration,
+        )
+        self.trace_axes["pvt"] = self._pvt_index(
+            data_products["time_series_power"]["length"], capture_duration
+        )
+        psd_samples = data_products["power_spectral_density"]["length"]
+        self.trace_axes["psd"] = self._psd_index(
+            psd_samples,
+            sample_rate
+            * psd_samples
+            / data_products["power_spectral_density"]["samples"],
+        )
+        self.trace_axes["apd"] = self._apd_index(
+            data_products["amplitude_probability_distribution"]["min_amplitude"],
+            data_products["amplitude_probability_distribution"]["max_amplitude"],
+            data_products["amplitude_probability_distribution"]["amplitude_bin_size"],
+        )
+
+        # cycle through the channels for metadata and data index maps
+        channel_meta = {}
+        trace_starts_keys = []
+        trace_starts_values = []
+
+        for capture in json_meta["captures"]:
+            capture = dict(capture)
+
+            frequency = capture.pop("core:frequency")
+            sample_start = capture.pop("core:sample_start")
+            capture["datetime"] = _iso_to_datetime(capture.pop("core:datetime"), tz)
+
+            # pull calibration info and sigan settings up a level
+            for k in ["sensor_calibration", "sigan_settings"]:
+                capture.update(capture.pop(f"ntia-sensor:{k}"))
+            # change key names for backwards-compatibility
+            # note: "cal_temperature_degC" key is new in v4
+            capture = {self.CAPTURE_KEYMAP.get(k, k): v for k, v in capture.items()}
+
+            channel_meta[frequency] = capture
+
+            trace_starts_keys.extend(sample_start + trace_offsets)
+            trace_starts_values.extend(trace_labels)
+
+        self.trace_starts = dict(zip(trace_starts_keys, trace_starts_values))
+
+        # slurp up the metadata
+        sweep_meta = dict(
+            sample_rate=json_meta["global"]["core:sample_rate"],
+            version=json_meta["global"]["core:version"],
+            metadata_version=json_meta["global"]["core:extensions"][5]["version"],
+            schedule_name=json_meta["global"]["ntia-scos:schedule"]["name"],
+            schedule_start_datetime=_iso_to_datetime(
+                json_meta["global"]["ntia-scos:schedule"]["start"], tz
+            ),
+            schedule_interval=json_meta["global"]["ntia-scos:schedule"]["interval"],
+            task=json_meta["global"]["ntia-scos:task"],
+            diagnostics_datetime=_iso_to_datetime(
+                json_meta["global"]["ntia-diagnostics:diagnostics"]["datetime"], tz
+            ),
+        )
+        sweep_meta.update(json_meta["global"]["ntia-diagnostics:diagnostics"])
+
+        self.meta = dict(channel_metadata=channel_meta, sweep_metadata=sweep_meta)
+
+    def unpack_arrays(self, data):
+        arrs_dict = super().unpack_arrays(data)
+        # Remove unnecessary "detector" nesting for APD
+        arrs_dict["apd"] = arrs_dict["apd"][frozendict({"detector": "apd_temp"})]
+        # arrs_dict["apd"] is now the 2D numpy array of APD percentiles,
+        # with shape (n_channels, apd_length)
+        return arrs_dict
+
+    def unpack_dataframes(self, data):
+        df_dict = super().unpack_dataframes(data)
+        # Remove unnecessary APD "detector" index
+        df_dict["apd"] = df_dict["apd"].droplevel("detector")
+        return df_dict
+
+
 def _get_loader(json_meta: dict):
     """return a loader object appropriate to the metadata version"""
     if not hasattr(json_meta, "keys") or not callable(json_meta.keys):
@@ -547,7 +694,13 @@ def _get_loader(json_meta: dict):
     except KeyError as ex:
         raise IOError("invalid metadata dictionary structure") from ex
 
-    version = extensions.get("ntia-nasctn-sea", None)
+    version = None    
+    if isinstance(extensions, tuple):
+        # v0.4+
+        version = [e["version"] for e in extensions if e["name"] == "ntia-nasctn-sea"][0]
+    elif isinstance(extensions, frozendict):
+        # v0.1, 0.2, or 0.3
+        version = extensions.get("ntia-nasctn-sea", None)
 
     if version is None:
         return _Loader_v1(json_meta)
@@ -555,6 +708,8 @@ def _get_loader(json_meta: dict):
         return _Loader_v2(json_meta)
     elif version == "v0.3":
         return _Loader_v3(json_meta)
+    elif version =="v0.4":
+        return _Loader_v4(json_meta)
     else:
         raise ValueError(f'unrecognized format version "{version}"')
 
@@ -563,9 +718,6 @@ def _freeze_meta(pairs):
     return frozendict(
         [(k, tuple(v) if isinstance(v, list) else v) for k, v in pairs.items()]
     )
-
-
-import hashlib
 
 
 def read_seamf(
@@ -599,10 +751,10 @@ def read_seamf(
         data_name = "/".join((name, name + ".sigmf-data"))
         lzma_data = tar_fd.extractfile(data_name).read()
 
-    # hash check
-    data_hash = hashlib.sha512(lzma_data).hexdigest()
-    if data_hash != meta["global"]["core:sha512"]:
-        raise IOError("seamf file data failed sha512 hash check")
+    if hash_check:
+        data_hash = hashlib.sha512(lzma_data).hexdigest()
+        if data_hash != meta["global"]["core:sha512"]:
+            raise IOError("seamf file data failed sha512 hash check")
 
     # the duration of this operation is dominated by lzma.decompress, not disk access or numpy
     # (on a 2020-vintage laptop with an SSD)

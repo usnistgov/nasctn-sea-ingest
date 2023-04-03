@@ -13,7 +13,7 @@ editable-backend = "src"
 
 [project]
 name = "sea_ingest"
-version = "0.1"
+version = "0.2"
 description = "quick load and aggregate for low-level 'seamf' SEA sensor output data files"
 authors = [
     {name = "Dan Kuester", email = "daniel.kuester@nist.gov"},
@@ -32,6 +32,7 @@ dependencies = [
     "dask[complete]>=2023.3.0",
     "lz4>=4.3.2",
     "matplotlib<3.7,>=3.6",
+    "timezonefinder>=6.0.2"
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.8,<3.11"
 license = {file = "LICENSE.md"}

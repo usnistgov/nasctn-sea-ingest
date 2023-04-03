@@ -21,7 +21,6 @@ authors = [
 dependencies = [
     "pyarrow>=11.0.0",
     "pandas>=1.5.3",
-    "numpy>=1.24.2",
     "methodtools>=0.4.7",
     "frozendict>=2.3.4",
     "quickle>=0.4.0",
@@ -32,7 +31,8 @@ dependencies = [
     "dask[complete]>=2023.3.0",
     "lz4>=4.3.2",
     "matplotlib<3.7,>=3.6",
-    "timezonefinder>=6.0.2"
+    "timezonefinder>=6.0.2",
+    "numpy<1.24,>=1.23",
 ]
 requires-python = ">=3.8,<3.11"
 license = {file = "LICENSE.md"}

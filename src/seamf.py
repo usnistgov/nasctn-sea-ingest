@@ -155,7 +155,11 @@ class _LoaderBase:
 
         frames = {}
         for name in trace_groups.keys():
-            if name in self.TABULAR_GROUPS:
+            if name not in self.TABULAR_GROUPS:
+                # not tabular set of traces of the same size
+                frames[name] = dict(trace_groups[name])
+            elif isinstance(trace_groups[name], dict):
+                # tabular set of traces with some trace keying info
                 group_data = np.array(list(trace_groups[name].values())).swapaxes(0, 1)
                 group_data = group_data.reshape(
                     (group_data.shape[0] * group_data.shape[1], group_data.shape[2])
@@ -173,9 +177,13 @@ class _LoaderBase:
                         len(capture_index) :
                     ]
                     frames[name].sort_index(inplace=True, level=sort_order)
-
             else:
-                frames[name] = dict(trace_groups[name])
+                # if there aren't multiple keys for sub-traces, it's just
+                # a simpler single array
+                group_data = np.array(trace_groups[name])
+                columns = self.trace_axes[name]
+                frames[name] = pd.DataFrame(group_data, index=capture_index, columns=columns)
+
 
         # channel metadata
         values = np.array(
@@ -669,19 +677,19 @@ class _Loader_v4(_LoaderBase):
 
         self.meta = dict(channel_metadata=channel_meta, sweep_metadata=sweep_meta)
 
-    def unpack_arrays(self, data):
-        arrs_dict = super().unpack_arrays(data)
-        # Remove unnecessary "detector" nesting for APD
-        arrs_dict["apd"] = arrs_dict["apd"][frozendict({"detector": "apd_temp"})]
-        # arrs_dict["apd"] is now the 2D numpy array of APD percentiles,
-        # with shape (n_channels, apd_length)
-        return arrs_dict
+    # def unpack_arrays(self, data):
+    #     arrs_dict = super().unpack_arrays(data)
+    #     # Remove unnecessary "detector" nesting for APD
+    #     arrs_dict["apd"] = arrs_dict["apd"][frozendict({"detector": "apd_temp"})]
+    #     # arrs_dict["apd"] is now the 2D numpy array of APD percentiles,
+    #     # with shape (n_channels, apd_length)
+    #     return arrs_dict
 
-    def unpack_dataframes(self, data):
-        df_dict = super().unpack_dataframes(data)
-        # Remove unnecessary APD "detector" index
-        df_dict["apd"] = df_dict["apd"].droplevel("detector")
-        return df_dict
+    # def unpack_dataframes(self, data):
+    #     df_dict = super().unpack_dataframes(data)
+    #     # Remove unnecessary APD "detector" index
+    #     df_dict["apd"] = df_dict["apd"].droplevel("detector")
+    #     return df_dict
 
 
 def _get_loader(json_meta: dict):

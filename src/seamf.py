@@ -74,6 +74,7 @@ def _iso_to_datetime(s, tz):
 
 
 _TI = namedtuple("_TI", field_names=("type", "metadata"))
+_UNLABELED_TRACE = frozendict({None: None})
 
 # cache the timezone lookups since we expect a discrete, small number of unique timezones
 _unique_timezone_at = functools.lru_cache(TimezoneFinder().unique_timezone_at)
@@ -142,9 +143,16 @@ class _LoaderBase:
             trace_groups[trace_type][trace_name].append(np.array(trace))
 
         for trace_type in self.TABULAR_GROUPS:
-            trace_groups[trace_type] = {
-                name: np.array(v) for name, v in trace_groups[trace_type].items()
-            }
+            first_key, *_ = trace_groups[trace_type].keys()
+            if len(trace_groups[trace_type]) == 1 and first_key is _UNLABELED_TRACE:
+                # a single unlabeled trace
+                first_value, *_ = trace_groups[trace_type].values()
+                trace_groups[trace_type] = np.array(first_value)
+            else:
+                # dictionary of multiple traces
+                trace_groups[trace_type] = {
+                    name: np.array(v) for name, v in trace_groups[trace_type].items()
+                }
 
         return dict(trace_groups, **self.meta)
 
@@ -160,7 +168,7 @@ class _LoaderBase:
                 # not tabular set of traces of the same size
                 frames[name] = dict(trace_groups[name])
             elif isinstance(trace_groups[name], dict):
-                # tabular set of traces with some trace keying info
+                # keyed sub-traces at each frequency
                 group_data = np.array(list(trace_groups[name].values())).swapaxes(0, 1)
                 group_data = group_data.reshape(
                     (group_data.shape[0] * group_data.shape[1], group_data.shape[2])
@@ -174,14 +182,14 @@ class _LoaderBase:
                 frames[name] = pd.DataFrame(group_data, index=index, columns=columns)
 
                 if len(frames[name].index.names) > len(capture_index):
-                    sort_order = ["datetime"] + frames[name].index.names[
-                        len(capture_index) :
-                    ]
+                    sort_order = (
+                        ["datetime"] +
+                        frames[name].index.names[len(capture_index):]
+                    )
                     frames[name].sort_index(inplace=True, level=sort_order)
             else:
-                # if there aren't multiple keys for sub-traces, it's just
-                # a simpler single array
-                group_data = np.array(trace_groups[name])
+                # a single unlabeled trace per frequency
+                group_data = trace_groups[name]
                 columns = self.trace_axes[name]
                 frames[name] = pd.DataFrame(group_data, index=capture_index, columns=columns)
 
@@ -577,7 +585,7 @@ class _Loader_v4(_LoaderBase):
         "attenuation": "sigan_attenuation_dB",
         "preamp_enable": "sigan_preamp_enable",
     }
-    
+
     @classmethod
     @methodtools.lru_cache()
     def _get_trace_metadata(cls, data_products: frozendict):
@@ -587,7 +595,7 @@ class _Loader_v4(_LoaderBase):
         trace_labels = []
         for short_name, json_name in cls.TABULAR_GROUPS.items():
             dp_field = data_products[json_name]
-            for trace_obj in dp_field.get("traces", [{"detector": "apd_temp"}]):
+            for trace_obj in dp_field.get("traces", [_UNLABELED_TRACE]):
                 # APD has no trace object; temporarily populate trace_labels
                 # This is later removed in unpack_dataframes or unpack_arrays
                 trace_offsets.append(offset_total)
@@ -597,7 +605,7 @@ class _Loader_v4(_LoaderBase):
         cls._trace_offsets = dict(zip(trace_offsets, trace_labels))
 
         return np.array(trace_offsets), trace_labels
-    
+
     @staticmethod
     @functools.lru_cache()
     def _apd_index(apd_min_bin_dBm, apd_max_bin_dBm, apd_bin_size_dB) -> pd.MultiIndex:
@@ -658,10 +666,7 @@ class _Loader_v4(_LoaderBase):
 
             frequency = capture.pop("core:frequency")
             sample_start = capture.pop("core:sample_start")
-            capture["datetime"] = _iso_to_datetime(
-                capture.pop("core:datetime"),
-                json_meta["timezone"]
-            )
+            timestamp = capture.pop("core:datetime")
 
             # pull calibration info and sigan settings up a level
             for k in ["sensor_calibration", "sigan_settings"]:
@@ -669,6 +674,7 @@ class _Loader_v4(_LoaderBase):
             # change key names for backwards-compatibility
             # note: "cal_temperature_degC" key is new in v4
             capture = {self.CAPTURE_KEYMAP.get(k, k): v for k, v in capture.items()}
+            capture["datetime"] = _iso_to_datetime(timestamp, json_meta["timezone"])
 
             channel_meta[frequency] = capture
 

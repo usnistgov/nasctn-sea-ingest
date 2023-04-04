@@ -64,7 +64,7 @@ def _cartesian_multiindex(i1: pd.MultiIndex, i2: pd.MultiIndex) -> pd.MultiIndex
     )
 
 
-def _iso_to_datetime(s, tz: str="America/New_York"):
+def _iso_to_datetime(s, tz):
     """returns a timezone aware datetime from a metadata timestamp string"""
     return (
         pd.Timestamp(np.datetime64(s[:-1]))
@@ -75,10 +75,11 @@ def _iso_to_datetime(s, tz: str="America/New_York"):
 
 _TI = namedtuple("_TI", field_names=("type", "metadata"))
 
-_TzFinder = TimezoneFinder()
+# cache the timezone lookups since we expect a discrete, small number of unique timezones
+_unique_timezone_at = functools.lru_cache(TimezoneFinder().unique_timezone_at)
 
 class _LoaderBase:
-    def __init__(self, json_meta: dict, tz="America/New_York"):
+    def __init__(self, json_meta: dict, tz: str):
         """initialize the object to unpack numpy.ndarray or pandas.DataFrame objects"""
         raise NotImplementedError
 
@@ -238,7 +239,10 @@ class _Loader_v1(_LoaderBase):
     }
 
     @functools.wraps(_LoaderBase.__init__)
-    def __init__(self, json_meta, tz="America/New_York"):
+    def __init__(self, json_meta):
+        if json_meta['timezone'] is None:
+            raise ValueError('could not automatically identify time zone, need to specify on load (e.g., "America/New_York")')
+        
         self.trace_starts = {}
         self.trace_axes = {}
 
@@ -250,7 +254,8 @@ class _Loader_v1(_LoaderBase):
             version=json_meta["global"]["core:version"],
             metadata_version="v0.1",
             calibration_datetime=_iso_to_datetime(
-                json_meta["global"]["ntia-sensor:calibration_datetime"], tz
+                json_meta["global"]["ntia-sensor:calibration_datetime"],
+                json_meta["timezone"]
             ),
             schedule_name=json_meta["global"]["ntia-scos:schedule"]["name"],
             schedule_start_datetime=json_meta["global"]["ntia-scos:schedule"]["start"],
@@ -274,9 +279,10 @@ class _Loader_v1(_LoaderBase):
             elif annot["ntia-core:annotation_type"] == "SensorAnnotation":
                 capture = capture_fields[annot["core:sample_start"]]
                 frequency = capture["core:frequency"]
+                timestamp = _iso_to_datetime(capture["core:datetime"], json_meta["timezone"])
                 channel_meta[frequency].update(
                     frequency=frequency,
-                    datetime=_iso_to_datetime(capture["core:datetime"], tz),
+                    datetime=timestamp,
                     overload=annot["ntia-sensor:overload"],
                     sigan_attenuation_dB=annot["ntia-sensor:attenuation_setting_sigan"],
                 )
@@ -350,7 +356,7 @@ class _Loader_v2(_LoaderBase):
     }
 
     @functools.wraps(_LoaderBase.__init__)
-    def __init__(self, json_meta, tz="America/New_York"):
+    def __init__(self, json_meta):
         self.trace_starts = {}
         self.trace_axes = {}
 
@@ -361,16 +367,19 @@ class _Loader_v2(_LoaderBase):
             version=json_meta["global"]["core:version"],
             metadata_version=json_meta["global"]["core:extensions"]["ntia-nasctn-sea"],
             calibration_datetime=_iso_to_datetime(
-                json_meta["global"]["ntia-sensor:calibration_datetime"], tz
+                json_meta["global"]["ntia-sensor:calibration_datetime"],
+                json_meta["timezone"]
             ),
             schedule_name=json_meta["global"]["ntia-scos:schedule"]["name"],
             schedule_start_datetime=_iso_to_datetime(
-                json_meta["global"]["ntia-scos:schedule"]["start"], tz
+                json_meta["global"]["ntia-scos:schedule"]["start"],
+                json_meta["timezone"]
             ),
             schedule_interval=json_meta["global"]["ntia-scos:schedule"]["interval"],
             task=json_meta["global"]["ntia-scos:task"],
             diagnostics_datetime=_iso_to_datetime(
-                json_meta["global"]["diagnostics"]["diagnostics_datetime"], tz
+                json_meta["global"]["diagnostics"]["diagnostics_datetime"], 
+                json_meta["timezone"]
             ),
         )
 
@@ -387,7 +396,7 @@ class _Loader_v2(_LoaderBase):
                 elif k.endswith("sample_start") and not k.startswith("core:"):
                     pass
                 elif k == "datetime":
-                    ts = _iso_to_datetime(ts, tz)
+                    ts = _iso_to_datetime(ts, json_meta["timezone"])
                     channel_meta[frequency][k.split(":", 1)[-1]] = ts
                     continue
                 else:
@@ -453,7 +462,7 @@ class _Loader_v3(_LoaderBase):
         return np.array(trace_offsets), trace_labels
 
     @functools.wraps(_LoaderBase.__init__)
-    def __init__(self, json_meta, tz="America/New_York"):
+    def __init__(self, json_meta):
         # get the vectors of offset indices of the each trace relative to the capture start
         data_products = json_meta["global"]["data_products"]
         trace_offsets, trace_labels = self._get_trace_metadata(data_products)
@@ -498,7 +507,10 @@ class _Loader_v3(_LoaderBase):
 
             frequency = capture.pop("core:frequency")
             sample_start = capture.pop("core:sample_start")
-            capture["datetime"] = _iso_to_datetime(capture.pop("core:datetime"), tz)
+            capture["datetime"] = _iso_to_datetime(
+                capture.pop("core:datetime"),
+                json_meta["timezone"]
+            )
 
             channel_meta[frequency] = capture
 
@@ -522,19 +534,22 @@ class _Loader_v3(_LoaderBase):
             version=json_meta["global"]["core:version"],
             metadata_version=json_meta["global"]["core:extensions"]["ntia-nasctn-sea"],
             calibration_datetime=_iso_to_datetime(
-                json_meta["global"]["ntia-sensor:calibration_datetime"], tz
+                json_meta["global"]["ntia-sensor:calibration_datetime"], 
+                json_meta["timezone"]
             ),
             calibration_temperature_degC=json_meta["global"][
                 "calibration_temperature_degC"
             ],
             schedule_name=json_meta["global"]["ntia-scos:schedule"]["name"],
             schedule_start_datetime=_iso_to_datetime(
-                json_meta["global"]["ntia-scos:schedule"]["start"], tz
+                json_meta["global"]["ntia-scos:schedule"]["start"], 
+                json_meta["timezone"]
             ),
             schedule_interval=json_meta["global"]["ntia-scos:schedule"]["interval"],
             task=json_meta["global"]["ntia-scos:task"],
             diagnostics_datetime=_iso_to_datetime(
-                json_meta["global"]["diagnostics"]["diagnostics_datetime"], tz
+                json_meta["global"]["diagnostics"]["diagnostics_datetime"], 
+                json_meta["timezone"]                
             ),
         )
         for v in json_meta["global"]["diagnostics"].values():
@@ -593,15 +608,16 @@ class _Loader_v4(_LoaderBase):
             name="Channel Power (dBm/10MHz)"
         )
 
-    
     @functools.wraps(_LoaderBase.__init__)
-    def __init__(self, json_meta, tz=None):
+    def __init__(self, json_meta):
         # get timezone from sensor location
-        if tz is None:
-            # Overriden if tz is specified on init
-            loc = json_meta["global"]["core:geolocation"]["coordinates"]
-            tz = _TzFinder.unique_timezone_at(lng=loc[0], lat=loc[1])
-        
+        # if json_meta["timezone"] is None:
+        #     # Overriden if tz is specified on init
+        #     loc = json_meta["global"]["core:geolocation"]["coordinates"]
+        #     tz = _unique_timezone_at(lng=loc[0], lat=loc[1])
+        # else:
+        #     tz = json_meta["timezone"]
+
         # get the vectors of offset indices of the each trace relative to the capture start
         data_products = json_meta["global"]["ntia-algorithm:data_products"]
         trace_offsets, trace_labels = self._get_trace_metadata(data_products)
@@ -642,7 +658,10 @@ class _Loader_v4(_LoaderBase):
 
             frequency = capture.pop("core:frequency")
             sample_start = capture.pop("core:sample_start")
-            capture["datetime"] = _iso_to_datetime(capture.pop("core:datetime"), tz)
+            capture["datetime"] = _iso_to_datetime(
+                capture.pop("core:datetime"),
+                json_meta["timezone"]
+            )
 
             # pull calibration info and sigan settings up a level
             for k in ["sensor_calibration", "sigan_settings"]:
@@ -665,31 +684,19 @@ class _Loader_v4(_LoaderBase):
             metadata_version=json_meta["global"]["core:extensions"][5]["version"],
             schedule_name=json_meta["global"]["ntia-scos:schedule"]["name"],
             schedule_start_datetime=_iso_to_datetime(
-                json_meta["global"]["ntia-scos:schedule"]["start"], tz
+                json_meta["global"]["ntia-scos:schedule"]["start"],
+                json_meta["timezone"]
             ),
             schedule_interval=json_meta["global"]["ntia-scos:schedule"]["interval"],
             task=json_meta["global"]["ntia-scos:task"],
             diagnostics_datetime=_iso_to_datetime(
-                json_meta["global"]["ntia-diagnostics:diagnostics"]["datetime"], tz
+                json_meta["global"]["ntia-diagnostics:diagnostics"]["datetime"],
+                json_meta["timezone"]
             ),
         )
         sweep_meta.update(json_meta["global"]["ntia-diagnostics:diagnostics"])
 
         self.meta = dict(channel_metadata=channel_meta, sweep_metadata=sweep_meta)
-
-    # def unpack_arrays(self, data):
-    #     arrs_dict = super().unpack_arrays(data)
-    #     # Remove unnecessary "detector" nesting for APD
-    #     arrs_dict["apd"] = arrs_dict["apd"][frozendict({"detector": "apd_temp"})]
-    #     # arrs_dict["apd"] is now the 2D numpy array of APD percentiles,
-    #     # with shape (n_channels, apd_length)
-    #     return arrs_dict
-
-    # def unpack_dataframes(self, data):
-    #     df_dict = super().unpack_dataframes(data)
-    #     # Remove unnecessary APD "detector" index
-    #     df_dict["apd"] = df_dict["apd"].droplevel("detector")
-    #     return df_dict
 
 
 def _get_loader(json_meta: dict):
@@ -729,7 +736,7 @@ def _freeze_meta(pairs):
 
 
 def read_seamf(
-    file, force_loader_cls=False, container_cls=pd.DataFrame, hash_check=True
+    file, force_loader_cls=False, container_cls=pd.DataFrame, hash_check=True, tz=None
 ) -> dict:
     """unpacks a sensor data file into a dictionary of numpy or pandas objects
 
@@ -764,6 +771,17 @@ def read_seamf(
         if data_hash != meta["global"]["core:sha512"]:
             raise IOError("seamf file data failed sha512 hash check")
 
+    if tz is None:
+        # try to automatically update time zone from metadata
+        loc = meta.get("global", {}).get("core:geolocation",{}).get("coordinates",None)
+
+        if loc is None:
+            raise ValueError('could not automatically identify time zone, need to specify, e.g., tz="America/New_York"')
+        else:
+            tz = _unique_timezone_at(lng=loc[0], lat=loc[1])
+
+    meta = frozendict(meta, timezone=tz)
+
     # the duration of this operation is dominated by lzma.decompress, not disk access or numpy
     # (on a 2020-vintage laptop with an SSD)
     byte_data = lzma.decompress(lzma_data)
@@ -795,7 +813,7 @@ def read_seamf(
         raise TypeError('invalid "container_cls"')
 
 
-def read_seamf_meta(file, func=None):
+def read_seamf_meta(file, tz=None):
     if isinstance(file, (str, Path)):
         kws = {"name": file}
     else:
@@ -809,5 +827,16 @@ def read_seamf_meta(file, func=None):
         meta = json.loads(
             tar_fd.extractfile(meta_name).read(), object_hook=_freeze_meta
         )
+
+    if tz is None:
+        # try to automatically update time zone from metadata
+        loc = meta.get("global", {}).get("core:geolocation",{}).get("coordinates",None)
+
+        if loc is None:
+            raise ValueError('could not automatically identify time zone, need to specify, e.g., tz="America/New_York"')
+        else:
+            tz = _unique_timezone_at(lng=loc[0], lat=loc[1])
+
+    meta = frozendict(meta, timezone=tz)
 
     return meta

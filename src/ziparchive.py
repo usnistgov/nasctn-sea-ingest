@@ -168,6 +168,7 @@ def read_seamf_zipfile_as_delayed(
     limit_count: int = None,
     partition_size: int = 40,
     dataframe_info: bool = False,
+    tz=None
 ) -> typing.List[dask.delayed]:
     """scan the zip file archive(s) at `data_path` and return a list of dask.delayed objects.
 
@@ -219,7 +220,7 @@ def read_seamf_zipfile_as_delayed(
 
     @dask.delayed
     def read_partition(files: list, errors="log"):
-        ret = read_seamf_zipfile(zfile, allow=files, errors=errors)
+        ret = read_seamf_zipfile(zfile, tz=tz, allow=files, errors=errors)
         if partition_func is not None and ret is not None:
             ret = partition_func(ret)
             if not isinstance(ret, dict):
@@ -256,7 +257,7 @@ def read_seamf_zipfile_as_delayed(
         }
 
         # the index value boundaries between data file partitions
-        divisions = _read_seamf_zipfile_divisions(zfile, partition_size, filelist)
+        divisions = _read_seamf_zipfile_divisions(zfile, partition_size, filelist, tz=tz)
 
         df_info = {
             k: dict(meta=meta_map[k], divisions=divisions) for k in meta_map.keys()
@@ -268,7 +269,7 @@ def read_seamf_zipfile_as_delayed(
 
 
 def read_seamf_zipfile_as_ddf(
-    data_path, partition_func=None, limit_count: int = None, partition_size=40
+    data_path, partition_func=None, limit_count: int = None, partition_size=100, tz=None
 ) -> typing.Dict[str, dask.dataframe.DataFrame]:
     """scans the file(s) specified by data_path, returning a dictionary of dask DataFrame objects for setting up operations.
 
@@ -309,13 +310,14 @@ def read_seamf_zipfile_as_ddf(
 
 
 def read_seamf_zipfile(
-    zipfile_or_path, allow: list = None, errors="raise"
+    zipfile_or_path, allow: list = None, errors="raise", tz=None
 ) -> typing.Dict[str, pd.DataFrame]:
     """reads SEA-SigMF sensor data file(s) from the specified archive.
 
     Args:
         allow: `None` to read all files, an integer to read a fixed number of sweeps, or an explicit list of file names
         errors: 'raise' to raise exceptions, or 'log' to swallow each exception in `read_seamf` and write to log
+        tz: timezone e.g. "America/New_York", which needs to be specified for metadata v3 and older
 
     Returns:
         a dictionary of pandas dataframes, keyed by name of the data product or metadata
@@ -326,7 +328,7 @@ def read_seamf_zipfile(
     def single_read(zfile: MultiProcessingZipFile, fn):
         try:
             with zfile.open(fn) as fd:
-                return read_seamf(fd)
+                return read_seamf(fd, tz=tz)
 
         except BaseException as ex:
             if errors == "raise":
@@ -401,7 +403,7 @@ def restore_multiindex(dfs: typing.Dict[str, pd.DataFrame]):
 
 
 def _read_seamf_zipfile_divisions(
-    zipfile_or_path, partition_size: int, file_list: list
+    zipfile_or_path, partition_size: int, file_list: list, tz=None
 ) -> list:
     """reads SEA-SigMF sensor data file(s) from the specified archive
 
@@ -410,7 +412,7 @@ def _read_seamf_zipfile_divisions(
 
     def single_read(zfile, fn):
         with zfile.open(fn) as fd:
-            return read_seamf_meta(fd)
+            return read_seamf_meta(fd, tz=tz)
 
     if isinstance(zipfile_or_path, zipfile.ZipFile):
         # TODO: this will probably fail if zipfile_or_path was opened as anything
@@ -433,12 +435,12 @@ def _read_seamf_zipfile_divisions(
         dicts = [single_read(zfile, filename) for filename in division_list]
 
     starts = [
-        _iso_to_datetime(d["captures"][0]["core:datetime"], "America/New_York")
+        _iso_to_datetime(d["captures"][0]["core:datetime"], d['timezone'])
         for d in dicts
     ]
 
     starts.append(
-        _iso_to_datetime(dicts[-1]["captures"][-1]["core:datetime"], "America/New_York")
+        _iso_to_datetime(dicts[-1]["captures"][-1]["core:datetime"], dicts[-1]['timezone'])
     )
 
     return starts

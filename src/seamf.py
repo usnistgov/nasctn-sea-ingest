@@ -167,7 +167,7 @@ class _LoaderBase:
             if name not in self.TABULAR_GROUPS:
                 # not tabular set of traces of the same size
                 frames[name] = dict(trace_groups[name])
-            elif isinstance(trace_groups[name], dict):
+            elif tuple(trace_groups[name].keys()) != (_UNLABELED_TRACE,):
                 # keyed sub-traces at each frequency
                 group_data = np.array(list(trace_groups[name].values())).swapaxes(0, 1)
                 group_data = group_data.reshape(
@@ -189,7 +189,7 @@ class _LoaderBase:
                     frames[name].sort_index(inplace=True, level=sort_order)
             else:
                 # a single unlabeled trace per frequency
-                group_data = trace_groups[name]
+                group_data = list(trace_groups[name].values())[0]
                 columns = self.trace_axes[name]
                 frames[name] = pd.DataFrame(group_data, index=capture_index, columns=columns)
 
@@ -437,18 +437,24 @@ class _Loader_v3(_LoaderBase):
         pfp="periodic_frame_power",
     )
 
-    @staticmethod
-    def _parse_trace_string(meta_str) -> tuple:
+    DETECTOR_NAMEMAP = dict(
+        max = 'peak',
+        mean = 'rms'
+    )
+
+    @classmethod
+    def _parse_trace_string(cls, dp_type, meta_str) -> tuple:
         """returns a (detector,) or (detector, capture_statistic) tuple"""
         split = tuple(meta_str.split("_"))
-        if len(split) == 2:
-            return frozendict(detector=split[0])
-        elif len(split) == 3:
+        if dp_type == 'pvt':
+            detector = cls.DETECTOR_NAMEMAP[split[0]]
+            return frozendict(detector=detector)
+        elif dp_type == 'psd':
+            return frozendict(capture_statistic=split[0])
+        elif dp_type == 'pfp':
             return frozendict(detector=split[0], capture_statistic=split[1])
-        elif len(split) < 2:
-            raise ValueError("too few fields in metadata detector string")
-        elif len(split) > 3:
-            raise ValueError("too many fields in metadata detector string")
+        else:
+            raise ValueError(f"unknown data product type '{dp_type}'")
 
     @classmethod
     @methodtools.lru_cache()
@@ -461,7 +467,7 @@ class _Loader_v3(_LoaderBase):
             dp_field = data_products[json_name]
             for trace_name in dp_field.get("detector", [None]):
                 trace_offsets.append(offset_total)
-                trace_meta = cls._parse_trace_string(trace_name)
+                trace_meta = cls._parse_trace_string(short_name, trace_name)
                 trace_labels.append(_TI(short_name, trace_meta))
                 offset_total += dp_field["sample_count"]
 
@@ -478,15 +484,14 @@ class _Loader_v3(_LoaderBase):
         # in v0.4 we can add apd here too
         self.trace_axes = {}
         sample_rate = json_meta["global"]["core:sample_rate"]
-        capture_duration = (
-            sample_rate * data_products["time_series_power"]["number_of_samples"]
-        )
+        capture_duration = json_meta["captures"][0]['iq_capture_duration_msec']/1000.
 
         self.trace_axes["pfp"] = self._pfp_index(
             data_products["periodic_frame_power"]["sample_count"],
             data_products["time_series_power"]["sample_count"],
             capture_duration,
         )
+
         self.trace_axes["pvt"] = self._pvt_index(
             data_products["time_series_power"]["sample_count"], capture_duration
         )
@@ -586,6 +591,14 @@ class _Loader_v4(_LoaderBase):
         "preamp_enable": "sigan_preamp_enable",
     }
 
+    TRACE_FIELD_NAMEMAP = {
+        # ordered and name mapping from metadata into dataframe.
+        # should be all-inclusive
+        "statistic": "capture_statistic",
+        "detector": "detector",
+        None: None
+    }
+
     @classmethod
     @methodtools.lru_cache()
     def _get_trace_metadata(cls, data_products: frozendict):
@@ -593,13 +606,24 @@ class _Loader_v4(_LoaderBase):
         offset_total = 0
         trace_offsets = []
         trace_labels = []
+        FIXED_TRACE_NAME_SET = set(cls.TRACE_FIELD_NAMEMAP.keys())
+
         for short_name, json_name in cls.TABULAR_GROUPS.items():
             dp_field = data_products[json_name]
+
+            # trace_objs = dp_field.get("traces", [_UNLABELED_TRACE])
+
             for trace_obj in dp_field.get("traces", [_UNLABELED_TRACE]):
                 # APD has no trace object; temporarily populate trace_labels
                 # This is later removed in unpack_dataframes or unpack_arrays
                 trace_offsets.append(offset_total)
-                trace_labels.append(_TI(short_name, frozendict(trace_obj)))
+
+                trace_obj = frozendict({
+                    cls.TRACE_FIELD_NAMEMAP.get(k, k): trace_obj[k]
+                    for k in cls.TRACE_FIELD_NAMEMAP.keys()
+                    if k in trace_obj.keys()
+                })
+                trace_labels.append(_TI(short_name, trace_obj))
                 offset_total += dp_field["length"]
 
         cls._trace_offsets = dict(zip(trace_offsets, trace_labels))

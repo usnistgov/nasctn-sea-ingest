@@ -403,8 +403,8 @@ class _Loader_v2(_LoaderBase):
                     continue
                 elif k.endswith("sample_start") and not k.startswith("core:"):
                     pass
-                elif k == "datetime":
-                    ts = _iso_to_datetime(ts, json_meta["timezone"])
+                elif k == "core:datetime":                    
+                    ts = _iso_to_datetime(v, json_meta["timezone"])
                     channel_meta[frequency][k.split(":", 1)[-1]] = ts
                     continue
                 else:

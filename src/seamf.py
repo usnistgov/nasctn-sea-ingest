@@ -613,8 +613,6 @@ class _Loader_v4(_LoaderBase):
         for short_name, json_name in cls.TABULAR_GROUPS.items():
             dp_field = data_products[json_name]
 
-            # trace_objs = dp_field.get("traces", [_UNLABELED_TRACE])
-
             for trace_obj in dp_field.get("traces", [_UNLABELED_TRACE]):
                 # APD has no trace object; temporarily populate trace_labels
                 # This is later removed in unpack_dataframes or unpack_arrays

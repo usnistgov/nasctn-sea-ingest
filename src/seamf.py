@@ -123,9 +123,11 @@ class _LoaderBase:
         # TODO: add analysis bandwidth to the metadata instead of hard-coding
 
         base = pd.RangeIndex(psd_sample_count, name="Baseband Frequency (Hz)")
+        bin_center_offset = +analysis_bandwidth_Hz/psd_sample_count/2
         return (
             base * (analysis_bandwidth_Hz / psd_sample_count)
             - analysis_bandwidth_Hz / 2
+            + bin_center_offset
         )
 
     @staticmethod

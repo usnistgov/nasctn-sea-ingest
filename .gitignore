@@ -129,4 +129,4 @@ dmypy.json
 .pyre/
 
 # PDM TOML contains local python interpreter path
-.pdm.toml
+.pdm-python

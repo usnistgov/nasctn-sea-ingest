@@ -5,3 +5,4 @@ from ziparchive import (
     read_seamf_zipfile_as_delayed,
     restore_multiindex,
 )
+__version__ = "0.3.0"

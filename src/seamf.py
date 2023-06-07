@@ -785,15 +785,15 @@ def read_seamf(
         kws = {"fileobj": file}
 
     with TarFile(**kws) as tar_fd:
-        name = tar_fd.getnames()[0]
+        tar_names = tar_fd.getnames()
 
         # meta is plain json
-        meta_name = "/".join((name, name + ".sigmf-meta"))
+        meta_name = [n for n in tar_names if n.endswith(".sigmf-meta")][0]
         meta = json.loads(
             tar_fd.extractfile(meta_name).read(), object_hook=_freeze_meta
         )
 
-        data_name = "/".join((name, name + ".sigmf-data"))
+        data_name = [n for n in tar_names if n.endswith(".sigmf-data")][0]
         lzma_data = tar_fd.extractfile(data_name).read()
 
     if hash_check:

@@ -9,11 +9,20 @@ dev = [
 ]
 
 [tool.pdm.build]
-editable-backend = "src"
+package-dir = "src"
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+excludes = ["demos/"]
+
+[tool.pdm.version]
+source = "file"
+path = "src/__init__.py"
 
 [project]
 name = "sea_ingest"
-version = "0.3"
+dynamic = ["version"]
 description = "quick load and aggregate for low-level 'seamf' SEA sensor output data files"
 authors = [
     {name = "Dan Kuester", email = "daniel.kuester@nist.gov"},

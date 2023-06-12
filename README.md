@@ -8,13 +8,20 @@ See also:
 - [sea-data-product](https://github.com/NTIA/sea-data-product): the latest usage and clear reference implementation for reading the seamf data format
 
 
-### Installation as a module to call from your own code
+### Install as a module
+This makes the `sea_ingest` module available for import from your own python scripts.
 
+#### For coexistence with conda or mamba package managers
+The idea here is to [re-use pre-existing base libraries when possible](https://www.anaconda.com/blog/using-pip-in-a-conda-environment) to minimize interaction problems between the two package managers.
+
+```python
+pip install --upgrade-strategy only-if-needed git+https://github.com/usnistgov/nasctn-sea-ingest
+```
+
+#### For pip-only ("bare python") package management
 ```python
 pip install git+https://github.com/usnistgov/nasctn-sea-ingest
 ```
-
-This installs the `sea_ingest` module.
 
 ### Setting up the development environment to run notebooks or develop nasctn-sea-ingest
 The following apply if you'd like to clone the project to develop the 

@@ -1,4 +1,3 @@
-import quickle
 import zipfile  # from zipfile import ZipFile, ZipInfo
 import pandas as pd
 import numpy as np
@@ -7,14 +6,13 @@ from natsort import natsorted
 import sys
 from eliot import log_call, start_action, log_message
 from traceback import format_tb
-import sys
 import dask
 import typing
 from dask import dataframe
 from functools import reduce
 from operator import add
 from dask_ops import multiindex_to_index
-
+import msgspec
 
 try:
     from .seamf import read_seamf, read_seamf_meta, _iso_to_datetime
@@ -22,14 +20,14 @@ except ImportError:
     from seamf import read_seamf, read_seamf_meta, _iso_to_datetime
 
 
-class QuackZipInfo(quickle.Struct):
-    """duck-typed ZipInfo clone for fast IPC serialized with quickle"""
+class QuackZipInfo(msgspec.Struct):
+    """duck-typed ZipInfo clone for fast IPC"""
 
     orig_filename: str
     filename: str
     date_time: tuple
     compress_type: int
-    _compresslevel: int
+    _compresslevel: typing.Union[int,None]
     comment: bytes
     extra: bytes
     create_system: int
@@ -62,9 +60,16 @@ class QuackZipInfo(quickle.Struct):
         return [cls.from_zipinfo(zinfo) for zinfo in filelist]
 
 
+class ZipFileCache(msgspec.Struct):
+    filename: str
+    _comment: bytes
+    start_dir: int
+    filelist: typing.List[QuackZipInfo]
+    NameToInfo: typing.Dict[str, QuackZipInfo]
+
 class CachedZipFile(zipfile.ZipFile):
-    _encoder = quickle.Encoder(registry=[QuackZipInfo])
-    _decoder = quickle.Decoder(registry=[QuackZipInfo])
+    _encoder = msgspec.msgpack.Encoder()
+    _decoder = msgspec.msgpack.Decoder(type=ZipFileCache)
 
     def __init__(self, cache, *args, **kws):
         self.cache = cache
@@ -72,9 +77,14 @@ class CachedZipFile(zipfile.ZipFile):
 
     def _RealGetContents(self):
         """monkeypatched: not so 'real' any more :)"""
-        cache = self._decoder.loads(self.cache)
-        for k, v in cache.items():
+        cache = self._decoder.decode(self.cache)
+        for k in cache.__annotations__.keys():
+            v = getattr(cache, k)
             setattr(self, k, v)
+
+    def getinfo(self, name):
+        # may be specific to python>=3.11
+        return self.NameToInfo[name]
 
 
 class MultiProcessingZipFile:
@@ -94,7 +104,8 @@ class MultiProcessingZipFile:
             zfile = zipfile.ZipFile(*args, **kws)
             filelist = QuackZipInfo.from_filelist(zfile.filelist)
             NameToInfo = dict(zip(zfile.NameToInfo.keys(), filelist))
-            self.cache = CachedZipFile._encoder.dumps(
+
+            self.cache = CachedZipFile._encoder.encode(
                 dict(
                     filename=zfile.filename,
                     _comment=zfile._comment,
@@ -103,6 +114,7 @@ class MultiProcessingZipFile:
                     NameToInfo=NameToInfo,
                 )
             )
+
             self._names = [f.filename for f in filelist]
             zfile.close()
 
@@ -137,6 +149,7 @@ class MultiProcessingZipFile:
     def open(self, fn):
         if self._zfile is None:
             raise IOError("open a zipfile context first")
+
         return self._zfile.open(fn)
 
     def __enter__(self):

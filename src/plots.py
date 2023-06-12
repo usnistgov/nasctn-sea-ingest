@@ -155,6 +155,7 @@ def plot_pfp_span_with_detail(day, freq, pfp_indicators, span, detail_datetimes)
     # detail view
     for (label, datetime), ax in zip(detail_datetimes.items(), axs[1:]):
         # remaining index levels will be ('capture_statistic', 'detector')
+        global pfp_traces
         pfp_traces = trace(dfs=day, type="pfp", datetime=datetime, frequency=freq)
         ax.text(
             0.01,

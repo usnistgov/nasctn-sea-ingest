@@ -13,6 +13,38 @@ import typing
 from timezonefinder import TimezoneFinder
 
 
+def localize_timestamps(dfs, tz=None):
+    if tz is None:
+        tz = dfs["site_metadata"]["timezone"]
+
+    for key, df in dict(dfs).items():
+        if isinstance(df, pd.DataFrame) and "datetime" in df.index.names:
+            # first, the row timestamps
+            index = df.index
+
+            i = index.names.index("datetime")
+
+            levels = list(index.levels)
+            levels[i] = levels[i].tz_convert(tz)
+
+            index = pd.MultiIndex(
+                codes=index.codes, levels=levels, names=df.index.names, sortorder=0
+            )
+
+            df = pd.DataFrame(df.values, index=index, columns=df.columns)
+
+        if isinstance(df, pd.DataFrame) and "metadata" in key:
+            # update metadata timestamps
+            dtypes = df.dtypes
+            new_dtypes = {}
+            for col in df.columns:
+                if isinstance(dtypes[col], pd.core.dtypes.dtypes.DatetimeTZDtype):
+                    new_dtypes[col] = pd.core.dtypes.dtypes.DatetimeTZDtype("ns", tz)
+            df = df.astype(new_dtypes)
+
+        dfs[key] = df
+
+
 def trace(dfs: dict, type: str = None, *columns: str, **inds) -> pd.DataFrame:
     """indexing shortcut for dictionaries of SEA pd.DataFrame data tables.
 
@@ -132,9 +164,9 @@ class _LoaderBase:
     @staticmethod
     @functools.lru_cache()
     def _trace_index(trace_dicts: typing.Tuple[frozendict]) -> pd.MultiIndex:
-        df = pd.DataFrame(trace_dicts)
-        if 'detector' in df.columns:
-            df.loc[:,'detector'].replace({'max': 'peak', 'mean': 'rms'},inplace=True)
+        df = pd.DataFrame(trace_dicts).sort_index(axis=1)
+        if "detector" in df.columns:
+            df.loc[:, "detector"].replace({"max": "peak", "mean": "rms"}, inplace=True)
         return pd.MultiIndex.from_frame(df)
 
     def unpack_arrays(self, data):
@@ -215,7 +247,7 @@ class _LoaderBase:
             frames,
             channel_metadata=channel_metadata,
             sweep_metadata=pd.DataFrame([self.meta["sweep_metadata"]]),
-            site_metadata=self.meta["site_metadata"]
+            site_metadata=self.meta["site_metadata"],
         )
 
 
@@ -315,7 +347,7 @@ class _Loader_v1(_LoaderBase):
         self.meta = frozendict(
             channel_metadata=frozendict(channel_meta),
             sweep_metadata=sweep_meta,
-            site_metadata=frozendict(timezone=json_meta["timezone"])
+            site_metadata=frozendict(timezone=json_meta["timezone"]),
         )
 
     def _update_frame_axes(self, annot, trace_type, sample_rate):
@@ -442,7 +474,7 @@ class _Loader_v2(_LoaderBase):
         self.meta = frozendict(
             channel_metadata=frozendict(channel_meta),
             sweep_metadata=sweep_meta,
-            site_metadata=frozendict(timezone=json_meta["timezone"])
+            site_metadata=frozendict(timezone=json_meta["timezone"]),
         )
 
 
@@ -581,7 +613,7 @@ class _Loader_v3(_LoaderBase):
         self.meta = frozendict(
             channel_metadata=frozendict(channel_meta),
             sweep_metadata=frozendict(sweep_meta),
-            site_metadata=frozendict(timezone=json_meta["timezone"])
+            site_metadata=frozendict(timezone=json_meta["timezone"]),
         )
 
 
@@ -740,7 +772,7 @@ class _Loader_v4(_LoaderBase):
         self.meta = frozendict(
             channel_metadata=frozendict(channel_meta),
             sweep_metadata=frozendict(sweep_meta),
-            site_metadata=frozendict(timezone=json_meta["timezone"])
+            site_metadata=frozendict(timezone=json_meta["timezone"]),
         )
 
 
@@ -783,7 +815,12 @@ def _freeze_meta(pairs):
 
 
 def read_seamf(
-    file, force_loader_cls=False, container_cls=pd.DataFrame, hash_check=True, tz=None
+    file,
+    force_loader_cls=False,
+    container_cls=pd.DataFrame,
+    hash_check=True,
+    tz=None,
+    localize=False,
 ) -> dict:
     """unpacks a sensor data file into a dictionary of numpy or pandas objects
 
@@ -800,6 +837,9 @@ def read_seamf(
         kws = {"name": file}
     else:
         kws = {"fileobj": file}
+
+    if localize and not issubclass(container_cls, pd.DataFrame):
+        raise ValueError("localize is only supported for pd.DataFrame container")
 
     with TarFile(**kws) as tar_fd:
         tar_names = tar_fd.getnames()
@@ -857,7 +897,11 @@ def read_seamf(
 
     # unpack the data
     if issubclass(container_cls, pd.DataFrame):
-        return loader.unpack_dataframes(data)
+        ret = loader.unpack_dataframes(data)
+        if localize:
+            localize_timestamps(ret)
+        return ret
+
     elif issubclass(container_cls, np.ndarray):
         return loader.unpack_arrays(data)
     else:

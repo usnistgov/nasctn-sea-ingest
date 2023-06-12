@@ -130,3 +130,6 @@ dmypy.json
 
 # PDM TOML contains local python interpreter path
 .pdm-python
+
+#
+demos/data/

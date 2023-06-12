@@ -12,12 +12,18 @@ from dask import dataframe
 from functools import reduce
 from operator import add
 from dask_ops import multiindex_to_index
+from frozendict import frozendict
 import msgspec
 
 try:
-    from .seamf import read_seamf, read_seamf_meta, _iso_to_datetime
+    from .seamf import (
+        read_seamf,
+        read_seamf_meta,
+        _iso_to_datetime,
+        localize_timestamps,
+    )
 except ImportError:
-    from seamf import read_seamf, read_seamf_meta, _iso_to_datetime
+    from seamf import read_seamf, read_seamf_meta, _iso_to_datetime, localize_timestamps
 
 
 class QuackZipInfo(msgspec.Struct):
@@ -27,7 +33,7 @@ class QuackZipInfo(msgspec.Struct):
     filename: str
     date_time: tuple
     compress_type: int
-    _compresslevel: typing.Union[int,None]
+    _compresslevel: typing.Union[int, None]
     comment: bytes
     extra: bytes
     create_system: int
@@ -66,6 +72,7 @@ class ZipFileCache(msgspec.Struct):
     start_dir: int
     filelist: typing.List[QuackZipInfo]
     NameToInfo: typing.Dict[str, QuackZipInfo]
+
 
 class CachedZipFile(zipfile.ZipFile):
     _encoder = msgspec.msgpack.Encoder()
@@ -167,11 +174,15 @@ def concat_dicts(*dicts):
     elif len(dicts) == 0:
         return None
 
-    return {
-        k: pd.concat([d[k] for d in dicts])
-        for k in dicts[0].keys()
-        if isinstance(dicts[0][k], pd.DataFrame)
-    }
+    ret = {}
+
+    for k in dicts[0].keys():
+        if isinstance(dicts[0][k], pd.DataFrame):
+            ret[k] = pd.concat([d[k] for d in dicts])
+        elif isinstance(dicts[0][k], (dict, frozendict)):
+            ret[k] = dicts[0][k]
+
+    return ret
 
 
 @log_call(include_result=False)
@@ -182,6 +193,7 @@ def read_seamf_zipfile_as_delayed(
     partition_size: int = 40,
     dataframe_info: bool = False,
     tz=None,
+    localize=False,
 ) -> typing.List[dask.delayed]:
     """scan the zip file archive(s) at `data_path` and return a list of dask.delayed objects.
 
@@ -234,6 +246,8 @@ def read_seamf_zipfile_as_delayed(
     @dask.delayed
     def read_partition(files: list, errors="log"):
         ret = read_seamf_zipfile(zfile, tz=tz, allow=files, errors=errors)
+        if localize:
+            localize_timestamps(ret)
         if partition_func is not None and ret is not None:
             ret = partition_func(ret)
             if not isinstance(ret, dict):
@@ -284,7 +298,12 @@ def read_seamf_zipfile_as_delayed(
 
 
 def read_seamf_zipfile_as_ddf(
-    data_path, partition_func=None, limit_count: int = None, partition_size=100, tz=None
+    data_path,
+    partition_func=None,
+    limit_count: int = None,
+    partition_size=100,
+    tz=None,
+    localize=False,
 ) -> typing.Dict[str, dask.dataframe.DataFrame]:
     """scans the file(s) specified by data_path, returning a dictionary of dask DataFrame objects for setting up operations.
 
@@ -325,7 +344,7 @@ def read_seamf_zipfile_as_ddf(
 
 
 def read_seamf_zipfile(
-    zipfile_or_path, allow: list = None, errors="raise", tz=None
+    zipfile_or_path, allow: list = None, errors="raise", tz=None, localize=False
 ) -> typing.Dict[str, pd.DataFrame]:
     """reads SEA-SigMF sensor data file(s) from the specified archive.
 
@@ -403,6 +422,9 @@ def read_seamf_zipfile(
 
     ret = concat_dicts(*ret)
 
+    if localize:
+        localize_timestamps(ret)
+
     return ret
 
 
@@ -449,15 +471,8 @@ def _read_seamf_zipfile_divisions(
 
         dicts = [single_read(zfile, filename) for filename in division_list]
 
-    starts = [
-        _iso_to_datetime(d["captures"][0]["core:datetime"])
-        for d in dicts
-    ]
+    starts = [_iso_to_datetime(d["captures"][0]["core:datetime"]) for d in dicts]
 
-    starts.append(
-        _iso_to_datetime(
-            dicts[-1]["captures"][-1]["core:datetime"]
-        )
-    )
+    starts.append(_iso_to_datetime(dicts[-1]["captures"][-1]["core:datetime"]))
 
     return starts

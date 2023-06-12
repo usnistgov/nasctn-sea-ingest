@@ -28,20 +28,20 @@ authors = [
     {name = "Dan Kuester", email = "daniel.kuester@nist.gov"},
 ]
 dependencies = [
-    "pyarrow>=11.0.0",
-    "pandas>=1.5.3",
+    "pyarrow>=10.0",
+    "pandas>=1.5.3,<2",
     "methodtools>=0.4.7",
     "frozendict>=2.3.4",
-    "quickle>=0.4.0",
     "natsort>=8.2.0",
     "msgpack>=1.0.4",
     "eliot>=1.14.0",
     "distributed>=2023.2.1",
     "dask[complete]>=2023.3.0",
     "lz4>=4.3.2",
-    "matplotlib<3.7,>=3.6",
+    "matplotlib>=3.6,<3.7",
     "timezonefinder>=6.0.2",
     "numpy<1.24,>=1.23",
+    "msgspec>=0.15.1",
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.8,<3.12"
 license = {file = "LICENSE.md"}

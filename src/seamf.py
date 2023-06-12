@@ -15,7 +15,7 @@ from timezonefinder import TimezoneFinder
 
 def localize_timestamps(dfs, tz=None):
     if tz is None:
-        tz = dfs["site_metadata"]["timezone"]
+        tz = dfs["sensor_metadata"]["timezone"]
 
     for key, df in dict(dfs).items():
         if isinstance(df, pd.DataFrame) and "datetime" in df.index.names:
@@ -247,7 +247,7 @@ class _LoaderBase:
             frames,
             channel_metadata=channel_metadata,
             sweep_metadata=pd.DataFrame([self.meta["sweep_metadata"]]),
-            site_metadata=self.meta["site_metadata"],
+            sensor_metadata=self.meta["sensor_metadata"],
         )
 
 
@@ -347,7 +347,7 @@ class _Loader_v1(_LoaderBase):
         self.meta = frozendict(
             channel_metadata=frozendict(channel_meta),
             sweep_metadata=sweep_meta,
-            site_metadata=frozendict(timezone=json_meta["timezone"]),
+            sensor_metadata=frozendict(timezone=json_meta["timezone"]),
         )
 
     def _update_frame_axes(self, annot, trace_type, sample_rate):
@@ -474,7 +474,7 @@ class _Loader_v2(_LoaderBase):
         self.meta = frozendict(
             channel_metadata=frozendict(channel_meta),
             sweep_metadata=sweep_meta,
-            site_metadata=frozendict(timezone=json_meta["timezone"]),
+            sensor_metadata=frozendict(timezone=json_meta["timezone"]),
         )
 
 
@@ -613,7 +613,7 @@ class _Loader_v3(_LoaderBase):
         self.meta = frozendict(
             channel_metadata=frozendict(channel_meta),
             sweep_metadata=frozendict(sweep_meta),
-            site_metadata=frozendict(timezone=json_meta["timezone"]),
+            sensor_metadata=frozendict(timezone=json_meta["timezone"]),
         )
 
 
@@ -772,7 +772,7 @@ class _Loader_v4(_LoaderBase):
         self.meta = frozendict(
             channel_metadata=frozendict(channel_meta),
             sweep_metadata=frozendict(sweep_meta),
-            site_metadata=frozendict(timezone=json_meta["timezone"]),
+            sensor_metadata=frozendict(timezone=json_meta["timezone"]),
         )
 
 
@@ -908,7 +908,7 @@ def read_seamf(
         raise TypeError('invalid "container_cls"')
 
 
-def read_seamf_meta(file, tz=None):
+def read_seamf_meta(file, parse=True, tz=None):
     if isinstance(file, (str, Path)):
         kws = {"name": file}
     else:
@@ -919,9 +919,13 @@ def read_seamf_meta(file, tz=None):
 
         # meta is plain json
         meta_name = "/".join((name, name + ".sigmf-meta"))
-        meta = json.loads(
-            tar_fd.extractfile(meta_name).read(), object_hook=_freeze_meta
-        )
+
+        meta_contents = tar_fd.extractfile(meta_name).read()
+
+    if not parse:
+        return meta_contents
+    
+    meta = json.loads(meta_contents, object_hook=_freeze_meta)
 
     if tz is None:
         # try to automatically update time zone from metadata

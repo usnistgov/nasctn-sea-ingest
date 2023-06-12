@@ -1,4 +1,3 @@
-import quickle
 import zipfile  # from zipfile import ZipFile, ZipInfo
 import pandas as pd
 import numpy as np
@@ -7,29 +6,34 @@ from natsort import natsorted
 import sys
 from eliot import log_call, start_action, log_message
 from traceback import format_tb
-import sys
 import dask
 import typing
 from dask import dataframe
 from functools import reduce
 from operator import add
 from dask_ops import multiindex_to_index
-
+from frozendict import frozendict
+import msgspec
 
 try:
-    from .seamf import read_seamf, read_seamf_meta, _iso_to_datetime
+    from .seamf import (
+        read_seamf,
+        read_seamf_meta,
+        _iso_to_datetime,
+        localize_timestamps,
+    )
 except ImportError:
-    from seamf import read_seamf, read_seamf_meta, _iso_to_datetime
+    from seamf import read_seamf, read_seamf_meta, _iso_to_datetime, localize_timestamps
 
 
-class QuackZipInfo(quickle.Struct):
-    """duck-typed ZipInfo clone for fast IPC serialized with quickle"""
+class QuackZipInfo(msgspec.Struct):
+    """duck-typed ZipInfo clone for fast IPC"""
 
     orig_filename: str
     filename: str
     date_time: tuple
     compress_type: int
-    _compresslevel: int
+    _compresslevel: typing.Union[int, None]
     comment: bytes
     extra: bytes
     create_system: int
@@ -62,9 +66,17 @@ class QuackZipInfo(quickle.Struct):
         return [cls.from_zipinfo(zinfo) for zinfo in filelist]
 
 
+class ZipFileCache(msgspec.Struct):
+    filename: str
+    _comment: bytes
+    start_dir: int
+    filelist: typing.List[QuackZipInfo]
+    NameToInfo: typing.Dict[str, QuackZipInfo]
+
+
 class CachedZipFile(zipfile.ZipFile):
-    _encoder = quickle.Encoder(registry=[QuackZipInfo])
-    _decoder = quickle.Decoder(registry=[QuackZipInfo])
+    _encoder = msgspec.msgpack.Encoder()
+    _decoder = msgspec.msgpack.Decoder(type=ZipFileCache)
 
     def __init__(self, cache, *args, **kws):
         self.cache = cache
@@ -72,9 +84,14 @@ class CachedZipFile(zipfile.ZipFile):
 
     def _RealGetContents(self):
         """monkeypatched: not so 'real' any more :)"""
-        cache = self._decoder.loads(self.cache)
-        for k, v in cache.items():
+        cache = self._decoder.decode(self.cache)
+        for k in cache.__annotations__.keys():
+            v = getattr(cache, k)
             setattr(self, k, v)
+
+    def getinfo(self, name):
+        # may be specific to python>=3.11
+        return self.NameToInfo[name]
 
 
 class MultiProcessingZipFile:
@@ -94,7 +111,8 @@ class MultiProcessingZipFile:
             zfile = zipfile.ZipFile(*args, **kws)
             filelist = QuackZipInfo.from_filelist(zfile.filelist)
             NameToInfo = dict(zip(zfile.NameToInfo.keys(), filelist))
-            self.cache = CachedZipFile._encoder.dumps(
+
+            self.cache = CachedZipFile._encoder.encode(
                 dict(
                     filename=zfile.filename,
                     _comment=zfile._comment,
@@ -103,6 +121,7 @@ class MultiProcessingZipFile:
                     NameToInfo=NameToInfo,
                 )
             )
+
             self._names = [f.filename for f in filelist]
             zfile.close()
 
@@ -137,6 +156,7 @@ class MultiProcessingZipFile:
     def open(self, fn):
         if self._zfile is None:
             raise IOError("open a zipfile context first")
+
         return self._zfile.open(fn)
 
     def __enter__(self):
@@ -154,11 +174,15 @@ def concat_dicts(*dicts):
     elif len(dicts) == 0:
         return None
 
-    return {
-        k: pd.concat([d[k] for d in dicts])
-        for k in dicts[0].keys()
-        if isinstance(dicts[0][k], pd.DataFrame)
-    }
+    ret = {}
+
+    for k in dicts[0].keys():
+        if isinstance(dicts[0][k], pd.DataFrame):
+            ret[k] = pd.concat([d[k] for d in dicts])
+        elif isinstance(dicts[0][k], (dict, frozendict)):
+            ret[k] = dicts[0][k]
+
+    return ret
 
 
 @log_call(include_result=False)
@@ -168,7 +192,8 @@ def read_seamf_zipfile_as_delayed(
     limit_count: int = None,
     partition_size: int = 40,
     dataframe_info: bool = False,
-    tz=None
+    tz=None,
+    localize=False,
 ) -> typing.List[dask.delayed]:
     """scan the zip file archive(s) at `data_path` and return a list of dask.delayed objects.
 
@@ -221,6 +246,8 @@ def read_seamf_zipfile_as_delayed(
     @dask.delayed
     def read_partition(files: list, errors="log"):
         ret = read_seamf_zipfile(zfile, tz=tz, allow=files, errors=errors)
+        if localize:
+            localize_timestamps(ret)
         if partition_func is not None and ret is not None:
             ret = partition_func(ret)
             if not isinstance(ret, dict):
@@ -257,7 +284,9 @@ def read_seamf_zipfile_as_delayed(
         }
 
         # the index value boundaries between data file partitions
-        divisions = _read_seamf_zipfile_divisions(zfile, partition_size, filelist, tz=tz)
+        divisions = _read_seamf_zipfile_divisions(
+            zfile, partition_size, filelist, tz=tz
+        )
 
         df_info = {
             k: dict(meta=meta_map[k], divisions=divisions) for k in meta_map.keys()
@@ -269,7 +298,12 @@ def read_seamf_zipfile_as_delayed(
 
 
 def read_seamf_zipfile_as_ddf(
-    data_path, partition_func=None, limit_count: int = None, partition_size=100, tz=None
+    data_path,
+    partition_func=None,
+    limit_count: int = None,
+    partition_size=100,
+    tz=None,
+    localize=False,
 ) -> typing.Dict[str, dask.dataframe.DataFrame]:
     """scans the file(s) specified by data_path, returning a dictionary of dask DataFrame objects for setting up operations.
 
@@ -310,7 +344,7 @@ def read_seamf_zipfile_as_ddf(
 
 
 def read_seamf_zipfile(
-    zipfile_or_path, allow: list = None, errors="raise", tz=None
+    zipfile_or_path, allow: list = None, errors="raise", tz=None, localize=False
 ) -> typing.Dict[str, pd.DataFrame]:
     """reads SEA-SigMF sensor data file(s) from the specified archive.
 
@@ -388,6 +422,9 @@ def read_seamf_zipfile(
 
     ret = concat_dicts(*ret)
 
+    if localize:
+        localize_timestamps(ret)
+
     return ret
 
 
@@ -434,13 +471,8 @@ def _read_seamf_zipfile_divisions(
 
         dicts = [single_read(zfile, filename) for filename in division_list]
 
-    starts = [
-        _iso_to_datetime(d["captures"][0]["core:datetime"], d['timezone'])
-        for d in dicts
-    ]
+    starts = [_iso_to_datetime(d["captures"][0]["core:datetime"]) for d in dicts]
 
-    starts.append(
-        _iso_to_datetime(dicts[-1]["captures"][-1]["core:datetime"], dicts[-1]['timezone'])
-    )
+    starts.append(_iso_to_datetime(dicts[-1]["captures"][-1]["core:datetime"]))
 
     return starts

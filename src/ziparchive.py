@@ -168,7 +168,7 @@ def read_seamf_zipfile_as_delayed(
     limit_count: int = None,
     partition_size: int = 40,
     dataframe_info: bool = False,
-    tz=None
+    tz=None,
 ) -> typing.List[dask.delayed]:
     """scan the zip file archive(s) at `data_path` and return a list of dask.delayed objects.
 
@@ -257,7 +257,9 @@ def read_seamf_zipfile_as_delayed(
         }
 
         # the index value boundaries between data file partitions
-        divisions = _read_seamf_zipfile_divisions(zfile, partition_size, filelist, tz=tz)
+        divisions = _read_seamf_zipfile_divisions(
+            zfile, partition_size, filelist, tz=tz
+        )
 
         df_info = {
             k: dict(meta=meta_map[k], divisions=divisions) for k in meta_map.keys()
@@ -435,12 +437,14 @@ def _read_seamf_zipfile_divisions(
         dicts = [single_read(zfile, filename) for filename in division_list]
 
     starts = [
-        _iso_to_datetime(d["captures"][0]["core:datetime"], d['timezone'])
+        _iso_to_datetime(d["captures"][0]["core:datetime"])
         for d in dicts
     ]
 
     starts.append(
-        _iso_to_datetime(dicts[-1]["captures"][-1]["core:datetime"], dicts[-1]['timezone'])
+        _iso_to_datetime(
+            dicts[-1]["captures"][-1]["core:datetime"]
+        )
     )
 
     return starts

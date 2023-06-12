@@ -1,6 +1,6 @@
 # NASCTN SEA Ingest
 
-This repository is focused on fast and convenient loading of many "seamf" SEA sensor output data files. These are the outputs from SEA sensors produced after edge compute analysis, with formatting based on SIGMF. Currently, `sea_ingest` supports file metadata versions 1, 2, and 3.
+This repository is focused on fast and convenient loading of many "seamf" SEA sensor output data files. These are the outputs from SEA sensors produced after edge compute analysis, with formatting based on SIGMF. Currently, `sea_ingest` supports file metadata versions {0.1, 0.2, 0.3, 0.4}.
 
 The data products and metadata are packaged into pandas or dask DataFrame objects. From there, the data can be analyzed directly, or piped into files or databases using dask multiprocessing hooks.
 

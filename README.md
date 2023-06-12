@@ -11,14 +11,14 @@ See also:
 ### Install as a module
 This makes the `sea_ingest` module available for import from your own python scripts.
 
-#### For coexistence with conda or mamba package managers
+#### For coexistence with conda or mamba
 The idea here is to [re-use pre-existing base libraries when possible](https://www.anaconda.com/blog/using-pip-in-a-conda-environment) to minimize interaction problems between the two package managers.
 
 ```python
 pip install --upgrade-strategy only-if-needed git+https://github.com/usnistgov/nasctn-sea-ingest
 ```
 
-#### For pip-only ("bare python") package management
+#### pip-only package management
 ```python
 pip install git+https://github.com/usnistgov/nasctn-sea-ingest
 ```

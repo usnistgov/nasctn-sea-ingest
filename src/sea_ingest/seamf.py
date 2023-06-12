@@ -1,15 +1,16 @@
 import functools
-import pandas as pd
+import hashlib
 import json
+import lzma
+import typing
+from collections import defaultdict, namedtuple
 from pathlib import Path
 from tarfile import TarFile
-import numpy as np
-import lzma
-import hashlib
-from collections import defaultdict, namedtuple
+
 import methodtools
+import numpy as np
+import pandas as pd
 from frozendict import frozendict
-import typing
 from timezonefinder import TimezoneFinder
 
 
@@ -924,7 +925,7 @@ def read_seamf_meta(file, parse=True, tz=None):
 
     if not parse:
         return meta_contents
-    
+
     meta = json.loads(meta_contents, object_hook=_freeze_meta)
 
     if tz is None:

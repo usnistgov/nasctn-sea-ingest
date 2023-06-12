@@ -1,29 +1,22 @@
-import zipfile  # from zipfile import ZipFile, ZipInfo
-import pandas as pd
-import numpy as np
-from pathlib import Path
-from natsort import natsorted
 import sys
-from eliot import log_call, start_action, log_message
-from traceback import format_tb
-import dask
 import typing
-from dask import dataframe
+import zipfile  # from zipfile import ZipFile, ZipInfo
 from functools import reduce
 from operator import add
-from dask_ops import multiindex_to_index
-from frozendict import frozendict
-import msgspec
+from pathlib import Path
+from traceback import format_tb
 
-try:
-    from .seamf import (
-        read_seamf,
-        read_seamf_meta,
-        _iso_to_datetime,
-        localize_timestamps,
-    )
-except ImportError:
-    from seamf import read_seamf, read_seamf_meta, _iso_to_datetime, localize_timestamps
+import dask
+import msgspec
+import numpy as np
+import pandas as pd
+from dask import dataframe
+from eliot import log_call, log_message, start_action
+from frozendict import frozendict
+from natsort import natsorted
+
+from .dask_ops import multiindex_to_index
+from .seamf import _iso_to_datetime, localize_timestamps, read_seamf, read_seamf_meta
 
 
 class QuackZipInfo(msgspec.Struct):

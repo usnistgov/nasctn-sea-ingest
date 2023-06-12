@@ -1,12 +1,14 @@
-import matplotlib as mpl
-from matplotlib.ticker import EngFormatter, MultipleLocator
-from matplotlib.dates import DateFormatter
-from matplotlib import rc
 import itertools
+
+import matplotlib as mpl
 import matplotlib.pyplot as plt
-import pandas as pd
 import numpy as np
-from seamf import trace
+import pandas as pd
+from matplotlib import rc
+from matplotlib.dates import DateFormatter
+from matplotlib.ticker import EngFormatter, MultipleLocator
+
+from .seamf import trace
 
 
 def transposed_legend(ax, *args, **kws):

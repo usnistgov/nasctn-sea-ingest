@@ -132,7 +132,10 @@ class _LoaderBase:
     @staticmethod
     @functools.lru_cache()
     def _trace_index(trace_dicts: typing.Tuple[frozendict]) -> pd.MultiIndex:
-        return pd.MultiIndex.from_frame(pd.DataFrame(trace_dicts))
+        df = pd.DataFrame(trace_dicts)
+        if 'detector' in df.columns:
+            df.loc[:,'detector'].replace({'max': 'peak', 'mean': 'rms'},inplace=True)
+        return pd.MultiIndex.from_frame(df)
 
     def unpack_arrays(self, data):
         """split the flat data vector into a dictionary of named traces"""

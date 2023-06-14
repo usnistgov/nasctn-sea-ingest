@@ -1,4 +1,3 @@
-import datetime
 import functools
 import hashlib
 import lzma
@@ -8,7 +7,6 @@ from pathlib import Path
 from tarfile import TarFile
 
 import methodtools
-import msgspec
 import numpy as np
 import pandas as pd
 from frozendict import frozendict
@@ -22,177 +20,22 @@ from .util import (
     cpd,
 )
 
+from .schemas import (
+    SchemaBase,
+    MetadataPre0_4,
+    MetadataSince0_4,
+    VersionInfo,
+)
+
 _TI = namedtuple("_TI", field_names=("type", "metadata"))
 _UNLABELED_TRACE = frozendict({None: None})
 
-# cache timezone lookups since we expect a discrete, small number of unique time zones
-_unique_timezone_at = functools.lru_cache(TimezoneFinder().unique_timezone_at)
-
-
-class Metadata(msgspec.Struct, frozen=False):
-    """a general-purpose schema for the 'SeaMF' metadata."""
-
-    GLOBAL_KEYS = [
-        "core:version",
-        "core:extensions",
-        "core:geolocation",
-        "core:datatype",
-        "core:sample_rate",
-        "core:num_channels",
-        "ntia-sensor:calibration_datetime",
-        "ntia-scos:task",
-        "ntia-scos:schedule",
-        "ntia-sensor:sensor",
-        "ntia-algorithm:digital_filters",
-        "ntia-nasctn-sea:max_of_max_channel_powers",
-        "ntia-nasctn-sea:median_of_mean_channel_powers",
-        "core:sha512",
-        # omitted keys with inconsistency across versions
-        # 'ntia-diagnostics:diagnostics',
-        # 'ntia-algorithm:data_products',
-    ]
-
-    GLOBAL_KEY_REMAP = {k.rsplit(":", 1)[1]: k for k in GLOBAL_KEYS}
-
-    class Global(msgspec.Struct, frozen=True, rename=GLOBAL_KEY_REMAP):
-        class DataProducts(msgspec.Struct, frozen=True):
-            class PSD(msgspec.Struct, frozen=True):
-                traces: typing.Tuple[frozendict, ...]
-                length: int
-                equivalent_noise_bandwidth: float
-                samples: int
-                ffts: int
-                units: str
-                window: str
-
-            class PFP(msgspec.Struct, frozen=True):
-                traces: typing.Tuple[frozendict, ...]
-                length: int
-                units: str
-
-            class PVT(msgspec.Struct, frozen=True):
-                traces: typing.Tuple[frozendict, ...]
-                length: int
-                samples: int
-                units: str
-
-            class APD(msgspec.Struct, frozen=True):
-                length: int
-                samples: int
-                probability_units: str
-                amplitude_bin_size: float
-                min_amplitude: float
-                max_amplitude: float
-
-            digital_filter: str = None
-            reference: typing.Union[str, None] = None
-
-            power_spectral_density: typing.Union[PSD, None] = None
-            periodic_frame_power: typing.Union[PFP, None] = None
-            time_series_power: typing.Union[PVT, None] = None
-            amplitude_probability_distribution: typing.Union[APD, None] = None
-
-        class LegacyDataProducts(msgspec.Struct, frozen=True):
-            class PSD(msgspec.Struct, frozen=True):
-                detector: typing.Tuple[str, ...]
-                sample_count: int
-                equivalent_noise_bandwidth: float
-                number_of_samples_in_fft: int
-                number_of_ffts: int
-                units: str
-                window: str
-
-            class PFP(msgspec.Struct, frozen=True):
-                detector: typing.Tuple[str, ...]
-                sample_count: int
-                units: str
-
-            class PVT(msgspec.Struct, frozen=True):
-                detector: typing.Tuple[str, ...]
-                sample_count: int
-                number_of_samples: int
-                units: str
-
-            class APD(msgspec.Struct, frozen=True):
-                sample_count: typing.Tuple[int, ...]
-                number_of_samples: int
-                probability_units: str
-                power_bin_size: float
-                units: str
-
-            # digital_filter: frozendict = frozendict()
-            reference: typing.Union[str, None] = None
-
-            power_spectral_density: typing.Union[PSD, None] = None
-            periodic_frame_power: typing.Union[PFP, None] = None
-            time_series_power: typing.Union[PVT, None] = None
-            amplitude_probability_distribution: typing.Union[APD, None] = None
-
-        version: str
-        datatype: str
-        extensions: typing.Union[typing.Tuple[frozendict, ...], dict]
-        sample_rate: float
-        sha512: str
-
-        # >= v0.4
-        data_products: typing.Union[DataProducts, None] = msgspec.field(
-            name="ntia-algorithm:data_products", default=None
-        )
-
-        # < v0.4
-        data_products_legacy: typing.Union[LegacyDataProducts, None] = msgspec.field(
-            name="data_products", default=None
-        )
-
-        task: typing.Union[int, None] = None
-        schedule: frozendict = frozendict()
-        sensor: frozendict = frozendict()
-        num_channels: int = 15
-        geolocation: frozendict = frozendict()
-
-        diagnostics: frozendict = msgspec.field(
-            name="ntia-diagnostics:diagnostics", default=frozendict()
-        )
-        legacy_diagnostics: frozendict = msgspec.field(
-            name="diagnostics", default=frozendict()
-        )
-
-        # < v0.4
-        calibration_datetime: typing.Union[str, None] = None
-        calibration_temperature_degC: typing.Union[float, None] = None
-
-        # data_products - skipping for now until we use the info
-        # digital_filters - skipping for now
-        # max_of_max_channel_powers - already in the data
-        # median_of_mean_channel_powers - in the data
-
-    global_: Global = msgspec.field(name="global")
-    annotations: typing.Tuple[frozendict, ...]
-    captures: typing.Tuple[frozendict, ...]
-    timezone: typing.Union[str, None] = None
-
-    @classmethod
-    def fromfile(cls, path_or_buf):
-        if isinstance(path_or_buf, (str, Path)):
-            with open(path_or_buf, "rb") as fb:
-                raw = fb.read()
-        else:
-            raw = path_or_buf.read()
-
-        return cls.fromstr(raw)
-
-    @classmethod
-    def fromstr(cls, json_str):
-        def dec_hook(type_, obj):
-            return type_(obj)
-
-        return msgspec.json.decode(json_str, type=cls, dec_hook=dec_hook)
+# cached timezone lookups from location
+timezone_at = functools.lru_cache(TimezoneFinder().unique_timezone_at)
 
 
 class _LoaderBase:
-    _df_dtypes_cache = {}
-
-    def __init__(self, json_meta: Metadata, tz: str):
+    def __init__(self, json_meta: SchemaBase, tz: str):
         """initialize the object to unpack numpy.ndarray or pandas.DataFrame objects"""
         raise NotImplementedError
 
@@ -387,7 +230,7 @@ class _Loader_v1(_LoaderBase):
     }
 
     @functools.wraps(_LoaderBase.__init__)
-    def __init__(self, json_meta: Metadata):
+    def __init__(self, json_meta: MetadataPre0_4):
         if json_meta.timezone is None:
             raise ValueError(
                 'could not automatically identify time zone, need to specify on load (e.g., "America/New_York")'
@@ -512,12 +355,12 @@ class _Loader_v2(_LoaderBase):
     }
 
     @functools.wraps(_LoaderBase.__init__)
-    def __init__(self, json_meta: Metadata):
+    def __init__(self, json_meta: MetadataPre0_4):
         self.trace_starts = {}
         self.trace_axes = {}
 
         channel_meta = defaultdict(dict)
-        diagnostics = json_meta.global_.legacy_diagnostics
+        diagnostics = json_meta.global_.diagnostics
 
         sweep_meta = dict(
             sample_rate=json_meta.global_.sample_rate,
@@ -605,7 +448,7 @@ class _Loader_v3(_LoaderBase):
 
     @classmethod
     @methodtools.lru_cache()
-    def _get_trace_metadata(cls, data_products: Metadata.Global.LegacyDataProducts):
+    def _get_trace_metadata(cls, data_products: MetadataPre0_4.Global.DataProducts):
         # this is cached since we expect data_products not to change very often
         offset_total = 0
         trace_offsets = []
@@ -623,9 +466,9 @@ class _Loader_v3(_LoaderBase):
         return np.array(trace_offsets), trace_labels
 
     @functools.wraps(_LoaderBase.__init__)
-    def __init__(self, json_meta: Metadata):
+    def __init__(self, json_meta: MetadataPre0_4):
         # get the vectors of offset indices of the each trace relative to the capture start
-        data_products = json_meta.global_.data_products_legacy
+        data_products = json_meta.global_.data_products
         trace_offsets, trace_labels = self._get_trace_metadata(data_products)
 
         # in v0.4 we can add apd here too
@@ -688,7 +531,7 @@ class _Loader_v3(_LoaderBase):
         self.trace_starts = dict(zip(trace_starts_keys, trace_starts_values))
 
         # slurp up the metadata
-        diagnostics = json_meta.global_.legacy_diagnostics
+        diagnostics = json_meta.global_.diagnostics
         sweep_meta = dict(
             sample_rate=json_meta.global_.sample_rate,
             version=json_meta.global_.version,
@@ -744,7 +587,7 @@ class _Loader_v4(_LoaderBase):
 
     @classmethod
     @methodtools.lru_cache()
-    def _get_trace_metadata(cls, data_products: Metadata.Global.DataProducts):
+    def _get_trace_metadata(cls, data_products: MetadataSince0_4.Global.DataProducts):
         # this is cached since we expect data_products not to change very often
         offset_total = 0
         trace_offsets = []
@@ -784,7 +627,7 @@ class _Loader_v4(_LoaderBase):
         )
 
     @functools.wraps(_LoaderBase.__init__)
-    def __init__(self, json_meta: Metadata):
+    def __init__(self, json_meta: MetadataSince0_4):
         # get timezone from sensor location
         # if json_meta.timezone is None:
         #     # Overriden if tz is specified on init
@@ -872,15 +715,12 @@ class _Loader_v4(_LoaderBase):
         )
 
 
-def _get_loader(json_meta: Metadata):
-    """return a loader object appropriate to the metadata version"""
-    if not isinstance(json_meta, Metadata):
-        raise ValueError('argument "meta" must be dict-like')
-
-    try:
-        extensions = json_meta.global_.extensions
-    except KeyError as ex:
-        raise IOError("invalid metadata dictionary structure") from ex
+def select_loader(
+    json_str: str,
+) -> typing.Tuple[SchemaBase, typing.Type[_LoaderBase]]:
+    """return metadata schema and loader type from the json metadata str"""
+    version_meta = VersionInfo.fromstr(json_str)
+    extensions = version_meta.global_.extensions
 
     version = None
     if isinstance(extensions, (list, tuple)):
@@ -893,13 +733,13 @@ def _get_loader(json_meta: Metadata):
         version = extensions.get("ntia-nasctn-sea", None)
 
     if version is None:
-        return _Loader_v1(json_meta)
+        return MetadataPre0_4.fromstr(json_str), _Loader_v1
     elif version == "v0.2":
-        return _Loader_v2(json_meta)
+        return MetadataPre0_4.fromstr(json_str), _Loader_v2
     elif version == "v0.3":
-        return _Loader_v3(json_meta)
+        return MetadataPre0_4.fromstr(json_str), _Loader_v3
     elif version == "v0.4":
-        return _Loader_v4(json_meta)
+        return MetadataSince0_4.fromstr(json_str), _Loader_v4
     else:
         raise ValueError(f'unrecognized format version "{version}"')
 
@@ -936,18 +776,21 @@ def read_seamf(
 
         # meta is plain json
         meta_name = [n for n in tar_names if n.endswith(".sigmf-meta")][0]
-        meta = Metadata.fromfile(tar_fd.extractfile(meta_name))
+        json_str = tar_fd.extractfile(meta_name).read()
 
         data_name = [n for n in tar_names if n.endswith(".sigmf-data")][0]
         lzma_data = tar_fd.extractfile(data_name).read()
 
+    meta, loader_cls = select_loader(json_str)
+
+    # validate data binary
     if hash_check:
         data_hash = hashlib.sha512(lzma_data).hexdigest()
         if data_hash != meta.global_.sha512:
             raise IOError("seamf file data failed sha512 hash check")
 
+    # try to automatically update time zone from metadata
     if tz is None:
-        # try to automatically update time zone from metadata
         loc = meta.global_.geolocation.get("coordinates", None)
 
         if loc is None:
@@ -955,8 +798,7 @@ def read_seamf(
                 'could not automatically identify time zone, need to specify, e.g., tz="America/New_York"'
             )
         else:
-            tz = _unique_timezone_at(lng=loc[0], lat=loc[1])
-
+            tz = timezone_at(lng=loc[0], lat=loc[1])
     meta.timezone = tz
 
     # the duration of this operation is dominated by lzma.decompress, not disk access or numpy
@@ -971,7 +813,7 @@ def read_seamf(
     if force_loader_cls is None:
         return data, meta
     elif force_loader_cls == False:
-        loader = _get_loader(meta)
+        loader = loader_cls(meta)
     elif isinstance(force_loader_cls, type) and issubclass(
         force_loader_cls, _LoaderBase
     ):
@@ -1011,7 +853,7 @@ def read_seamf_meta(file, parse=True, tz=None):
     if not parse:
         return meta_contents
 
-    meta = Metadata.fromstr(meta_contents)
+    meta, _ = select_loader(meta_contents)
 
     if tz is None:
         # try to automatically update time zone from metadata
@@ -1022,7 +864,7 @@ def read_seamf_meta(file, parse=True, tz=None):
                 'could not automatically identify time zone, need to specify, e.g., tz="America/New_York"'
             )
         else:
-            tz = _unique_timezone_at(lng=loc[0], lat=loc[1])
+            tz = timezone_at(lng=loc[0], lat=loc[1])
 
     meta.timezone = tz
 

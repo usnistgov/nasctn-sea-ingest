@@ -6,6 +6,7 @@ dev = [
     "black>=23.0",
     "labbench>=0.23.4",
     "bokeh",
+    "line-profiler>=4.0.3",
 ]
 
 [tool.pdm.build]

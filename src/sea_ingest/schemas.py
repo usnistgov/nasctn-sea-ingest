@@ -77,9 +77,7 @@ class GlobalSchemaBase(
 class MetadataPre0_4(SchemaBase, kw_only=True):
     """a general-purpose schema for the 'SeaMF' metadata for v0.3 and earlier"""
 
-    class Global(
-        GlobalSchemaBase, rename=SchemaBase._GLOBAL_KEYS_RENAME, frozen=True
-    ):
+    class Global(GlobalSchemaBase, rename=SchemaBase._GLOBAL_KEYS_RENAME, frozen=True):
         class DataProducts(msgspec.Struct, frozen=True):
             class PSD(msgspec.Struct, frozen=True):
                 detector: typing.Tuple[str, ...]

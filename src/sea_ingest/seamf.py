@@ -27,70 +27,73 @@ from .schemas import (
     VersionInfo,
 )
 
-_TI = namedtuple("_TI", field_names=("type", "metadata"))
+TypeInfo = namedtuple("_TI", field_names=("type", "metadata"))
 _UNLABELED_TRACE = frozendict({None: None})
 
 # cached timezone lookups from location
 timezone_at = functools.lru_cache(TimezoneFinder().unique_timezone_at)
 
 
+def _capture_index(channel_metadata: dict) -> pd.MultiIndex:
+    """returns a pd.MultiIndex containing datetime and frequency levels.
+
+    Args:
+        channel_metadata: mapping keyed on frequency; each entry is a dict that includes a 'datetime' key
+    """
+
+    times, freqs = zip(*[[d["datetime"], k] for k, d in channel_metadata.items()])
+
+    return pd.MultiIndex(
+        levels=(times, freqs),
+        codes=2 * [list(range(len(channel_metadata)))],
+        names=("datetime", "frequency"),
+        sortorder=0,
+        verify_integrity=False,
+    )
+
+
+@functools.lru_cache()
+def _pfp_index(
+    pfp_sample_count: int, pvt_sample_count: int, iq_capture_duration_sec: float
+) -> pd.MultiIndex:
+    base = pd.RangeIndex(pfp_sample_count, name="Frame time elapsed (s)")
+    return base * (iq_capture_duration_sec / pfp_sample_count / pvt_sample_count)
+
+
+@functools.lru_cache()
+def _pvt_index(pvt_sample_count: int, iq_capture_duration_sec: float) -> pd.MultiIndex:
+    base = pd.RangeIndex(pvt_sample_count, name="Capture time elapsed (s)")
+    return base * (iq_capture_duration_sec / pvt_sample_count)
+
+
+@functools.lru_cache()
+def _psd_index(psd_sample_count, analysis_bandwidth_Hz) -> pd.MultiIndex:
+    base = pd.RangeIndex(psd_sample_count, name="Baseband Frequency (Hz)")
+    bin_center_offset = +analysis_bandwidth_Hz / psd_sample_count / 2
+    return (
+        base * (analysis_bandwidth_Hz / psd_sample_count)
+        - analysis_bandwidth_Hz / 2
+        + bin_center_offset
+    )
+
+
+@functools.lru_cache()
+def _trace_index(trace_dicts: typing.Tuple[frozendict]) -> pd.MultiIndex:
+    df = pd.DataFrame(trace_dicts).sort_index(axis=1)
+    if "detector" in df.columns:
+        df.loc[:, "detector"].replace({"max": "peak", "mean": "rms"}, inplace=True)
+    return pd.MultiIndex.from_frame(df)
+
+
 class _LoaderBase:
+    TABULAR_GROUPS: tuple
+    trace_starts: dict
+    trace_axes: dict
+    meta: frozendict
+
     def __init__(self, json_meta: SchemaBase, tz: str):
         """initialize the object to unpack numpy.ndarray or pandas.DataFrame objects"""
         raise NotImplementedError
-
-    @staticmethod
-    def _capture_index(channel_metadata: dict) -> pd.MultiIndex:
-        """returns a pd.MultiIndex containing datetime and frequency levels.
-
-        Args:
-            channel_metadata: mapping keyed on frequency; each entry is a dict that includes a 'datetime' key
-        """
-
-        times, freqs = zip(*[[d["datetime"], k] for k, d in channel_metadata.items()])
-
-        return pd.MultiIndex(
-            levels=(times, freqs),
-            codes=2 * [list(range(len(channel_metadata)))],
-            names=("datetime", "frequency"),
-            sortorder=0,
-            verify_integrity=False,
-        )
-
-    @staticmethod
-    @functools.lru_cache()
-    def _pfp_index(
-        pfp_sample_count: int, pvt_sample_count: int, iq_capture_duration_sec: float
-    ) -> pd.MultiIndex:
-        base = pd.RangeIndex(pfp_sample_count, name="Frame time elapsed (s)")
-        return base * (iq_capture_duration_sec / pfp_sample_count / pvt_sample_count)
-
-    @staticmethod
-    @functools.lru_cache()
-    def _pvt_index(
-        pvt_sample_count: int, iq_capture_duration_sec: float
-    ) -> pd.MultiIndex:
-        base = pd.RangeIndex(pvt_sample_count, name="Capture time elapsed (s)")
-        return base * (iq_capture_duration_sec / pvt_sample_count)
-
-    @staticmethod
-    @functools.lru_cache()
-    def _psd_index(psd_sample_count, analysis_bandwidth_Hz) -> pd.MultiIndex:
-        base = pd.RangeIndex(psd_sample_count, name="Baseband Frequency (Hz)")
-        bin_center_offset = +analysis_bandwidth_Hz / psd_sample_count / 2
-        return (
-            base * (analysis_bandwidth_Hz / psd_sample_count)
-            - analysis_bandwidth_Hz / 2
-            + bin_center_offset
-        )
-
-    @staticmethod
-    @functools.lru_cache()
-    def _trace_index(trace_dicts: typing.Tuple[frozendict]) -> pd.MultiIndex:
-        df = pd.DataFrame(trace_dicts).sort_index(axis=1)
-        if "detector" in df.columns:
-            df.loc[:, "detector"].replace({"max": "peak", "mean": "rms"}, inplace=True)
-        return pd.MultiIndex.from_frame(df)
 
     def unpack_arrays(self, data):
         """split the flat data vector into a dictionary of named traces"""
@@ -116,16 +119,11 @@ class _LoaderBase:
 
         return dict(trace_groups, **self.meta)
 
-    @staticmethod
-    @functools.lru_cache()
-    def _df_index(self, index: tuple):
-        return pd.Index(tuple)
-
     def unpack_dataframes(self, data):
         trace_groups = self.unpack_arrays(data)
 
         # tabular data
-        capture_index = self._capture_index(self.meta["channel_metadata"])
+        capture_index = _capture_index(self.meta["channel_metadata"])
 
         frames = {}
         for name in trace_groups.keys():
@@ -138,7 +136,7 @@ class _LoaderBase:
                 group_data = group_data.reshape(
                     (group_data.shape[0] * group_data.shape[1], group_data.shape[2])
                 )
-                trace_index = self._trace_index(tuple(trace_groups[name].keys()))
+                trace_index = _trace_index(tuple(trace_groups[name].keys()))
                 index = _cartesian_multiindex(capture_index, trace_index)
 
                 # take the column definition from the first trace key, under the assumption
@@ -203,30 +201,30 @@ class _Loader_v1(_LoaderBase):
     # these are hard-coded since introspection of the trace info was difficult
     # and data were only generated in this structure
     TRACE_INFO = {
-        "psd_max_power": _TI("psd", frozendict(capture_statistic="max")),
-        "psd_mean_power": _TI("psd", frozendict(capture_statistic="mean")),
-        "pvt_max_power": _TI("pvt", frozendict(detector="peak")),
-        "pvt_mean_power": _TI("pvt", frozendict(detector="rms")),
-        "pfp_rms_min_power": _TI(
+        "psd_max_power": TypeInfo("psd", frozendict(capture_statistic="max")),
+        "psd_mean_power": TypeInfo("psd", frozendict(capture_statistic="mean")),
+        "pvt_max_power": TypeInfo("pvt", frozendict(detector="peak")),
+        "pvt_mean_power": TypeInfo("pvt", frozendict(detector="rms")),
+        "pfp_rms_min_power": TypeInfo(
             "pfp", frozendict(detector="rms", capture_statistic="min")
         ),
-        "pfp_rms_max_power": _TI(
+        "pfp_rms_max_power": TypeInfo(
             "pfp", frozendict(detector="rms", capture_statistic="max")
         ),
-        "pfp_rms_mean_power": _TI(
+        "pfp_rms_mean_power": TypeInfo(
             "pfp", frozendict(detector="rms", capture_statistic="mean")
         ),
-        "pfp_peak_min_power": _TI(
+        "pfp_peak_min_power": TypeInfo(
             "pfp", frozendict(detector="peak", capture_statistic="min")
         ),
-        "pfp_peak_max_power": _TI(
+        "pfp_peak_max_power": TypeInfo(
             "pfp", frozendict(detector="peak", capture_statistic="max")
         ),
-        "pfp_peak_mean_power": _TI(
+        "pfp_peak_mean_power": TypeInfo(
             "pfp", frozendict(detector="peak", capture_statistic="mean")
         ),
-        "apd_p_pct": _TI("apd", "percentile"),
-        "apd_a_dBm": _TI("apd", "sample_amplitude_dBm"),
+        "apd_p_pct": TypeInfo("apd", "percentile"),
+        "apd_a_dBm": TypeInfo("apd", "sample_amplitude_dBm"),
     }
 
     @functools.wraps(_LoaderBase.__init__)
@@ -298,22 +296,20 @@ class _Loader_v1(_LoaderBase):
 
     def _update_frame_axes(self, annot, trace_type, sample_rate):
         if trace_type == "pfp":
-            self.trace_axes[trace_type] = self._pfp_index(
+            self.trace_axes[trace_type] = _pfp_index(
                 annot["core:sample_count"],
                 400,  # TODO: pass from recent pvt trace data
                 4.0,  # TODO: pass from recent pvt trace data
             )
 
         elif trace_type == "pvt":
-            self.trace_axes[trace_type] = self._pvt_index(
+            self.trace_axes[trace_type] = _pvt_index(
                 annot["core:sample_count"],
                 annot["ntia-algorithm:number_of_samples"] / sample_rate,
             )
 
         elif trace_type == "psd":
-            self.trace_axes[trace_type] = self._psd_index(
-                annot["core:sample_count"], 10e6
-            )
+            self.trace_axes[trace_type] = _psd_index(annot["core:sample_count"], 10e6)
 
     @staticmethod
     def _trace_label(annot: dict):
@@ -332,26 +328,30 @@ class _Loader_v2(_LoaderBase):
     # these are hard-coded since introspection of the trace info was difficult
     # and data were only generated in this structure
     TRACE_INFO = {
-        "max_fft": _TI("psd", frozendict(capture_statistic="max")),
-        "mean_fft": _TI("psd", frozendict(capture_statistic="mean")),
-        "max_td_pwr_series": _TI("pvt", frozendict(detector="peak")),
-        "mean_td_pwr_series": _TI("pvt", frozendict(detector="rms")),
-        "min_rms_pfp": _TI("pfp", frozendict(detector="rms", capture_statistic="min")),
-        "max_rms_pfp": _TI("pfp", frozendict(detector="rms", capture_statistic="max")),
-        "mean_rms_pfp": _TI(
+        "max_fft": TypeInfo("psd", frozendict(capture_statistic="max")),
+        "mean_fft": TypeInfo("psd", frozendict(capture_statistic="mean")),
+        "max_td_pwr_series": TypeInfo("pvt", frozendict(detector="peak")),
+        "mean_td_pwr_series": TypeInfo("pvt", frozendict(detector="rms")),
+        "min_rms_pfp": TypeInfo(
+            "pfp", frozendict(detector="rms", capture_statistic="min")
+        ),
+        "max_rms_pfp": TypeInfo(
+            "pfp", frozendict(detector="rms", capture_statistic="max")
+        ),
+        "mean_rms_pfp": TypeInfo(
             "pfp", frozendict(detector="rms", capture_statistic="mean")
         ),
-        "min_peak_pfp": _TI(
+        "min_peak_pfp": TypeInfo(
             "pfp", frozendict(detector="peak", capture_statistic="min")
         ),
-        "max_peak_pfp": _TI(
+        "max_peak_pfp": TypeInfo(
             "pfp", frozendict(detector="peak", capture_statistic="max")
         ),
-        "mean_peak_pfp": _TI(
+        "mean_peak_pfp": TypeInfo(
             "pfp", frozendict(detector="peak", capture_statistic="mean")
         ),
-        "apd_p": _TI("apd", "percentile"),
-        "apd_a": _TI("apd", "sample_amplitude_dBm"),
+        "apd_p": TypeInfo("apd", "percentile"),
+        "apd_a": TypeInfo("apd", "sample_amplitude_dBm"),
     }
 
     @functools.wraps(_LoaderBase.__init__)
@@ -406,15 +406,15 @@ class _Loader_v2(_LoaderBase):
                 self.trace_starts[v] = trace_key
 
         # use the most recent capture info to populate the trace axis objects
-        self.trace_axes["pfp"] = self._pfp_index(
+        self.trace_axes["pfp"] = _pfp_index(
             capture["pfp_sample_count"],
             capture["td_pwr_sample_count"],
             capture["iq_capture_duration_msec"] / 1000.0,
         )
-        self.trace_axes["pvt"] = self._pvt_index(
+        self.trace_axes["pvt"] = _pvt_index(
             capture["td_pwr_sample_count"], capture["iq_capture_duration_msec"] / 1000.0
         )
-        self.trace_axes["psd"] = self._psd_index(capture["fft_sample_count"], 10e6)
+        self.trace_axes["psd"] = _psd_index(capture["fft_sample_count"], 10e6)
 
         self.meta = frozendict(
             channel_metadata=frozendict(channel_meta),
@@ -448,17 +448,17 @@ class _Loader_v3(_LoaderBase):
 
     @classmethod
     @methodtools.lru_cache()
-    def _get_trace_metadata(cls, data_products: MetadataPre0_4.Global.DataProducts):
+    def _get_trace_metadata(cls, trace_info: MetadataPre0_4.Global.DataProducts):
         # this is cached since we expect data_products not to change very often
         offset_total = 0
         trace_offsets = []
         trace_labels = []
         for short_name, json_name in cls.TABULAR_GROUPS.items():
-            dp_field = getattr(data_products, json_name)
+            dp_field = getattr(trace_info, json_name)
             for trace_name in getattr(dp_field, "detector", [None]):
                 trace_offsets.append(offset_total)
                 trace_meta = cls._parse_trace_string(short_name, trace_name)
-                trace_labels.append(_TI(short_name, trace_meta))
+                trace_labels.append(TypeInfo(short_name, trace_meta))
                 offset_total += dp_field.sample_count
 
         cls._trace_offsets = dict(zip(trace_offsets, trace_labels))
@@ -468,29 +468,29 @@ class _Loader_v3(_LoaderBase):
     @functools.wraps(_LoaderBase.__init__)
     def __init__(self, json_meta: MetadataPre0_4):
         # get the vectors of offset indices of the each trace relative to the capture start
-        data_products = json_meta.global_.data_products
-        trace_offsets, trace_labels = self._get_trace_metadata(data_products)
+        trace_info = json_meta.global_.data_products
+        trace_offsets, trace_labels = self._get_trace_metadata(trace_info)
 
         # in v0.4 we can add apd here too
         self.trace_axes = {}
         sample_rate = json_meta.global_.sample_rate
         capture_duration = json_meta.captures[0]["iq_capture_duration_msec"] / 1000.0
 
-        self.trace_axes["pfp"] = self._pfp_index(
-            data_products.periodic_frame_power.sample_count,
-            data_products.time_series_power.sample_count,
+        self.trace_axes["pfp"] = _pfp_index(
+            trace_info.periodic_frame_power.sample_count,
+            trace_info.time_series_power.sample_count,
             capture_duration,
         )
 
-        self.trace_axes["pvt"] = self._pvt_index(
-            data_products.time_series_power.sample_count, capture_duration
+        self.trace_axes["pvt"] = _pvt_index(
+            trace_info.time_series_power.sample_count, capture_duration
         )
-        psd_samples = data_products.power_spectral_density.sample_count
-        self.trace_axes["psd"] = self._psd_index(
+        psd_samples = trace_info.power_spectral_density.sample_count
+        self.trace_axes["psd"] = _psd_index(
             psd_samples,
             sample_rate
             * psd_samples
-            / data_products.power_spectral_density.number_of_samples_in_fft,
+            / trace_info.power_spectral_density.number_of_samples_in_fft,
         )
 
         # cycle through the channels for metadata and data index maps
@@ -499,12 +499,12 @@ class _Loader_v3(_LoaderBase):
         trace_starts_values = []
         apd_start_offset = trace_offsets[-1] + (trace_offsets[-1] - trace_offsets[-2])
         apd_trace_info = [
-            _TI(type="apd_p", metadata=frozendict({})),
-            _TI(type="apd_a", metadata=frozendict({})),
+            TypeInfo(type="apd_p", metadata=frozendict({})),
+            TypeInfo(type="apd_a", metadata=frozendict({})),
         ]
         for capture, apd_length in zip(
             json_meta.captures,
-            data_products.amplitude_probability_distribution.sample_count,
+            trace_info.amplitude_probability_distribution.sample_count,
         ):
             capture = dict(capture)
 
@@ -609,7 +609,7 @@ class _Loader_v4(_LoaderBase):
                         if k in trace_obj.keys()
                     }
                 )
-                trace_labels.append(_TI(short_name, trace_obj))
+                trace_labels.append(TypeInfo(short_name, trace_obj))
                 offset_total += dp_field.length
 
         cls._trace_offsets = dict(zip(trace_offsets, trace_labels))
@@ -645,16 +645,16 @@ class _Loader_v4(_LoaderBase):
         # (safely) assume all capture durations are identical
         capture_duration = json_meta.captures[0]["ntia-sensor:duration"] / 1000.0
 
-        self.trace_axes["pfp"] = self._pfp_index(
+        self.trace_axes["pfp"] = _pfp_index(
             data_products.periodic_frame_power.length,
             data_products.time_series_power.length,
             capture_duration,
         )
-        self.trace_axes["pvt"] = self._pvt_index(
+        self.trace_axes["pvt"] = _pvt_index(
             data_products.time_series_power.length, capture_duration
         )
         psd_samples = data_products.power_spectral_density.length
-        self.trace_axes["psd"] = self._psd_index(
+        self.trace_axes["psd"] = _psd_index(
             psd_samples,
             sample_rate * psd_samples / data_products.power_spectral_density.samples,
         )

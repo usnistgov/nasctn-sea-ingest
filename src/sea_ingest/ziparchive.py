@@ -294,7 +294,7 @@ def read_seamf_zipfile_as_ddf(
     data_path,
     partition_func=None,
     limit_count: int = None,
-    partition_size=100,
+    partition_size=200,
     tz=None,
     localize=False,
 ) -> typing.Dict[str, dask.dataframe.DataFrame]:
@@ -464,8 +464,8 @@ def _read_seamf_zipfile_divisions(
 
         dicts = [single_read(zfile, filename) for filename in division_list]
 
-    starts = [_iso_to_datetime(d["captures"][0]["core:datetime"]) for d in dicts]
+    starts = [_iso_to_datetime(d.captures[0]["core:datetime"]) for d in dicts]
 
-    starts.append(_iso_to_datetime(dicts[-1]["captures"][-1]["core:datetime"]))
+    starts.append(_iso_to_datetime(dicts[-1].captures[-1]["core:datetime"]))
 
     return starts

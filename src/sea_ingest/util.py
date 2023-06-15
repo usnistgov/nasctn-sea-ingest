@@ -44,19 +44,12 @@ def localize_timestamps(dfs, tz=None):
 
     for key, df in dict(dfs).items():
         if isinstance(df, pd.DataFrame) and "datetime" in df.index.names:
-            # first, the row timestamps
-            index = df.index
-
-            i = index.names.index("datetime")
-
-            levels = list(index.levels)
-            levels[i] = levels[i].tz_convert(tz)
-
-            index = pd.MultiIndex(
-                codes=index.codes, levels=levels, names=df.index.names, sortorder=0
+            df.index.set_levels(
+                df.index.get_level_values("datetime").tz_convert(tz),
+                level="datetime",
+                inplace=True,
+                verify_integrity=False,
             )
-
-            df = pd.DataFrame(df.values, index=index, columns=df.columns)
 
         if isinstance(df, pd.DataFrame) and "metadata" in key:
             # update metadata timestamps

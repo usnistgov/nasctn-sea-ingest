@@ -48,7 +48,6 @@ def _capture_index(channel_metadata: dict) -> pd.MultiIndex:
         codes=2 * [list(range(len(channel_metadata)))],
         names=("datetime", "frequency"),
         sortorder=0,
-        verify_integrity=False,
     )
 
 
@@ -758,7 +757,7 @@ def read_seamf(
     metadata version. Other valid values are `None` (to return metadata dictionary and a flat numpy data array)
     or `bytes` (for the metadata dictionary and data in bytes form) or one of the _Loader_v* classes.
 
-    The supported types of container object are pandas.DataFrame and numpy.ndarray.
+    The supported container object types are pandas.DataFrame and numpy.ndarray.
 
     When hash_check evaluates as True, the data contents are compared against the SHA512 hash
     in the metadata file.

@@ -1356,7 +1356,7 @@ dependencies = [
 lock_version = "4.2"
 cross_platform = true
 groups = ["default", "dev"]
-content_hash = "sha256:24f8103d57cd216bc95547506fa2a67d2260af3e2de7a967b423a0452d2f5163"
+content_hash = "sha256:3d7b4b271cbf6b0f1609ffe657f448616382132f4261b372a93d5370da750e37"
 
 [metadata.files]
 "anyio 3.7.0" = [

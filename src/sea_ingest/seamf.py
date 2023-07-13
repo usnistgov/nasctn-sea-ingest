@@ -23,7 +23,8 @@ from .util import (
 from .schemas import (
     SchemaBase,
     MetadataPre0_4,
-    MetadataSince0_4,
+    Metadata0_4,
+    MetadataSince0_5,
     VersionInfo,
 )
 
@@ -81,6 +82,8 @@ def _trace_index(trace_dicts: typing.Tuple[frozendict]) -> pd.MultiIndex:
     df = pd.DataFrame(trace_dicts).sort_index(axis=1)
     if "detector" in df.columns:
         df.loc[:, "detector"].replace({"max": "peak", "mean": "rms"}, inplace=True)
+    if "capture_statistic" in df.columns:
+        df.loc[:, "capture_statistic"].replace({"maximum": "max", "minimum": "min"}, inplace=True)
     return pd.MultiIndex.from_frame(df)
 
 
@@ -104,17 +107,7 @@ class _LoaderBase:
         for (trace_type, trace_name), trace in zip(self.trace_starts.values(), traces):
             trace_groups[trace_type][trace_name].append(np.array(trace))
 
-        for trace_type in self.TABULAR_GROUPS:
-            first_key, *_ = trace_groups[trace_type].keys()
-            if len(trace_groups[trace_type]) == 1 and first_key is _UNLABELED_TRACE:
-                # a single unlabeled trace
-                first_value, *_ = trace_groups[trace_type].values()
-                trace_groups[trace_type] = np.array(first_value)
-            else:
-                # dictionary of multiple traces
-                trace_groups[trace_type] = {
-                    name: np.array(v) for name, v in trace_groups[trace_type].items()
-                }
+        trace_groups = {trace_type: {name: np.array(v) for name, v in trace_groups[trace_type].items()} for trace_type in self.TABULAR_GROUPS}
 
         return dict(trace_groups, **self.meta)
 
@@ -586,12 +579,11 @@ class _Loader_v4(_LoaderBase):
 
     @classmethod
     @methodtools.lru_cache()
-    def _get_trace_metadata(cls, data_products: MetadataSince0_4.Global.DataProducts):
+    def _get_trace_metadata(cls, data_products: Metadata0_4.Global.DataProducts):
         # this is cached since we expect data_products not to change very often
         offset_total = 0
         trace_offsets = []
         trace_labels = []
-        FIXED_TRACE_NAME_SET = set(cls.TRACE_FIELD_NAMEMAP.keys())
 
         for short_name, json_name in cls.TABULAR_GROUPS.items():
             dp_field = getattr(data_products, json_name)
@@ -626,15 +618,7 @@ class _Loader_v4(_LoaderBase):
         )
 
     @functools.wraps(_LoaderBase.__init__)
-    def __init__(self, json_meta: MetadataSince0_4):
-        # get timezone from sensor location
-        # if json_meta.timezone is None:
-        #     # Overriden if tz is specified on init
-        #     loc = json_meta.global_.geolocation["coordinates"]
-        #     tz = _unique_timezone_at(lng=loc[0], lat=loc[1])
-        # else:
-        #     tz = json_meta.timezone
-
+    def __init__(self, json_meta: Metadata0_4):
         # get the vectors of offset indices of the each trace relative to the capture start
         data_products = json_meta.global_.data_products
         trace_offsets, trace_labels = self._get_trace_metadata(data_products)
@@ -713,6 +697,157 @@ class _Loader_v4(_LoaderBase):
             sensor_metadata=frozendict(timezone=json_meta.timezone),
         )
 
+class _Loader_v5(_LoaderBase):
+    TABULAR_GROUPS = dict(
+        psd="Power Spectral Density",
+        pvt="Power vs. Time",
+        pfp="Periodic Frame Power",
+        apd="Amplitude Probability Distribution",
+    )
+
+    CAPTURE_KEYMAP = {
+        "ntia-sensor:overload": "overload",
+        "ntia-sensor:duration": "iq_capture_duration_ms",
+        "noise_figure": "cal_noise_figure_dB",
+        "gain": "cal_gain_dB",
+        "temperature": "cal_temperature_degC",
+        "reference_level": "sigan_reference_level_dBm",
+        "attenuation": "sigan_attenuation_dB",
+        "preamp_enable": "sigan_preamp_enable",
+    }
+
+    TRACE_FIELD_NAMEMAP = {
+        # ordered and name mapping from metadata into dataframe.
+        # should be all-inclusive
+        "statistic": "capture_statistic",
+        "detector": "detector",
+        None: None,
+    }
+
+    TRACE_INDEX_LABELMAP = dict(
+        # Units filled from metadata object
+        psd="Baseband Frequency ({})",
+        pvt="Capture time elapsed ({})",
+        pfp="Frame time elapsed ({})",
+        apd="Channel Power ({}/10MHz)",
+    )
+
+    @classmethod
+    @methodtools.lru_cache()
+    def _get_trace_metadata(cls, data_products: typing.Tuple[MetadataSince0_5.Global.Graph]):
+        # Cached since data_products should not change often
+        offset_total = 0
+        trace_offsets = []
+        trace_labels = []
+        for graph_obj in data_products:
+            short_name = list(cls.TABULAR_GROUPS.keys())[list(cls.TABULAR_GROUPS.values()).index(graph_obj.name)]
+            if short_name not in cls.TABULAR_GROUPS:
+                raise ValueError(f"Unknown data product encountered in metadata: {graph_obj.name}")
+            if short_name == "apd":
+                # APD handling: mimic v4 loading with temporary unlabeled trace object
+                # The APD "Graph" object does not have a "series" (graph_obj.series is None here)
+                trace_offsets.append(offset_total)
+                trace_obj = frozendict({k:v for k, v in _UNLABELED_TRACE.items()})
+                trace_labels.append(TypeInfo(short_name, trace_obj))
+                offset_total += graph_obj.length
+            else:
+                # For other data products, graph_obj.series is an iterable of series (trace) names
+                # This is different from the trace objects present in v4, so handle them individually
+                # by the data product type (parsed from the name).
+                for series_name in graph_obj.series:
+                    trace_offsets.append(offset_total)
+                    if short_name == "pfp":
+                        # PFP handling: statistic and detector, delimited by "_"
+                        # Example: "mean_minimum" is RMS detector, minimum statistic.
+                        trace_obj = frozendict({
+                            "capture_statistic": series_name.split("_")[1],
+                            "detector": series_name.split("_")[0]
+                        })
+                    elif short_name == "psd":
+                        # PSD series names are statistic names
+                        trace_obj = frozendict({"capture_statistic": series_name})
+                    elif short_name == "pvt":
+                        # PVT series names are detector names
+                        trace_obj = frozendict({"detector": series_name})
+                    offset_total += graph_obj.length
+                    trace_labels.append(TypeInfo(short_name, trace_obj))
+        cls._trace_offsets = dict(zip(trace_offsets, trace_labels))
+        return np.array(trace_offsets), trace_labels
+    
+    def _set_trace_axes(self, data_products: typing.Tuple[MetadataSince0_5.Global.Graph]):
+        # Set the axes/index for each data product, using the Graph metadata
+        for graph in data_products:
+            short_name = list(self.TABULAR_GROUPS.keys())[list(self.TABULAR_GROUPS.values()).index(graph.name)]
+            if short_name == "apd":
+                # APD handling: use y-values instead of x-values
+                start, step, units = graph.y_start, graph.y_step, graph.y_units
+            else:
+                start, step, units = graph.x_start, graph.x_step, graph.x_units
+            assert all([len(s) == 1 for s in [start, step]])
+            start, step = start[0], step[0]
+            if short_name == "apd":
+                start, step = int(start), int(step)
+            # Generate and store the index
+            self.trace_axes[short_name] = (
+                pd.RangeIndex(graph.length, name=self.TRACE_INDEX_LABELMAP[short_name].format(units))
+                * step
+                + start
+            )
+    
+    @functools.wraps(_LoaderBase.__init__)
+    def __init__(self, json_meta: MetadataSince0_5):
+        data_products = json_meta.global_.data_products
+        trace_offsets, trace_labels = self._get_trace_metadata(data_products)
+        self.trace_axes = {}
+
+        self._set_trace_axes(data_products)
+
+        channel_meta = {}
+        trace_starts_keys = []
+        trace_starts_values = []
+
+        for capture in json_meta.captures:
+            capture = dict(capture)
+            frequency = capture.pop("core:frequency")
+            sample_start = capture.pop("core:sample_start")
+            timestamp = capture.pop("core:datetime")
+
+            for k in ["sensor_calibration", "sigan_settings"]:
+                capture.update(capture.pop(f"ntia-sensor:{k}"))
+            del capture["reference"]
+
+            capture = {self.CAPTURE_KEYMAP.get(k, k): v for k, v in capture.items()}
+            # note: calibration datetime is discarded, since the
+            # "datetime" key now refers to the "core:datetime" value (measurement timestamp)
+            # To retain the cal_timestamp, uncomment the following line:
+            # cal_timestamp = capture["datetime"]
+            capture["datetime"] = _iso_to_datetime(timestamp)
+            channel_meta[frequency] = capture
+            trace_starts_keys.extend(sample_start + trace_offsets)
+            trace_starts_values.extend(trace_labels)
+        self.trace_starts = dict(zip(trace_starts_keys, trace_starts_values))
+
+        sweep_meta = dict(
+            sample_rate=json_meta.global_.sample_rate,
+            version=json_meta.global_.version,
+            metadata_version=json_meta.global_.extensions[6]["version"],
+            schedule_name=json_meta.global_.schedule["name"],
+            schedule_start_datetime=_iso_to_datetime(
+                json_meta.global_.schedule["start"],
+            ),
+            schedule_interval=json_meta.global_.schedule["interval"],
+            task=json_meta.global_.task,
+            diagnostics_datetime=_iso_to_datetime(
+                json_meta.global_.diagnostics["datetime"],
+            ),
+        )
+        sweep_meta.update(json_meta.global_.diagnostics)
+        self.meta = frozendict(
+            channel_metadata=frozendict(channel_meta),
+            sweep_metadata=frozendict(sweep_meta),
+            sensor_metadata=frozendict(timezone=json_meta.timezone),
+        )
+
 
 def select_loader(
     json_str: str,
@@ -738,7 +873,17 @@ def select_loader(
     elif version == "v0.3":
         return MetadataPre0_4.fromstr(json_str), _Loader_v3
     elif version == "v0.4":
-        return MetadataSince0_4.fromstr(json_str), _Loader_v4
+        return Metadata0_4.fromstr(json_str), _Loader_v4
+    elif version == "v0.4.0": # This is confusing but correct
+        proc_info_str = b'        "ntia-algorithm:processing_info": [\n            {'
+        dft_info_str = b'},\n            {\n                "id": "psd_fft",'
+        proc_info_str_min = b'"ntia-algorithm:processing_info":[{'
+        dft_info_str_min = b'},{"id":"psd_fft",'
+        json_str = json_str.replace(proc_info_str, proc_info_str + b'\n                "type": "DigitalFilter",')
+        json_str = json_str.replace(dft_info_str, dft_info_str + b'\n                "type": "DFT",')
+        json_str = json_str.replace(proc_info_str_min, proc_info_str_min + b'"type":"DigitalFilter",')
+        json_str = json_str.replace(dft_info_str_min, dft_info_str_min + b'"type":"DFT",')
+        return MetadataSince0_5.fromstr(json_str), _Loader_v5
     else:
         raise ValueError(f'unrecognized format version "{version}"')
 

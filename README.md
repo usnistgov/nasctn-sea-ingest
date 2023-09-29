@@ -9,7 +9,7 @@ See also:
 
 
 ### Install as a module
-This makes the `sea_ingest` module available for import from your own python scripts. Only python versions {3.9, 3.10, 3.11} are supported (not version 3.8).
+This makes the `sea_ingest` module available for import from your own python scripts.
 
 #### For coexistence with conda or mamba
 The idea here is to [re-use pre-existing base libraries when possible](https://www.anaconda.com/blog/using-pip-in-a-conda-environment) to minimize interaction problems between the two package managers.
@@ -33,7 +33,7 @@ The following apply if you'd like to clone the project to develop the
    ```
 
 2. Environment setup:
-   - Make sure you've installed python 3.8 or newer making sure to include `pip` for base package management (for example, with `conda` or `miniconda`)
+   - Make sure you've installed **python 3.9 or newer** making sure to include `pip` for base package management (for example, with `conda` or `miniconda`)
    - Make sure you've installed `pdm`, which is used for dependency management isolated from other projects. This only needs to be done once in your python environment (not once per project). To do so, run the following in a command line environment:
 
       ```bash

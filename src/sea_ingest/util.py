@@ -44,10 +44,9 @@ def localize_timestamps(dfs, tz=None):
 
     for key, df in dict(dfs).items():
         if isinstance(df, pd.DataFrame) and "datetime" in df.index.names:
-            df.index.set_levels(
+            df.index = df.index.set_levels(
                 df.index.get_level_values("datetime").tz_convert(tz),
                 level="datetime",
-                inplace=True,
                 verify_integrity=False,
             )
 

@@ -38,6 +38,7 @@ class SchemaBase(msgspec.Struct, kw_only=True):
     def fromstr(cls, json_str):
         def dec_hook(type_, obj):
             return type_(obj)
+
         return msgspec.json.decode(json_str, type=cls, dec_hook=dec_hook)
 
     timezone: Union[str, None] = None
@@ -192,12 +193,17 @@ class Metadata0_4(SchemaBase, kw_only=True):
     annotations: Tuple[frozendict, ...]
     captures: Tuple[frozendict, ...]
 
-class MetadataSince0_5(SchemaBase, kw_only=True):
+
+class Metadata0_5(SchemaBase, kw_only=True):
     _GLOBAL_KEYS = SchemaBase._GLOBAL_KEYS + [
-        "core:recorder", "ntia-scos:schedule",
-        "ntia-scos:action", "ntia-core:classification",
-        "ntia-algorithm:processing", "ntia-algorithm:processing_info",
-        "ntia-algorithm:data_products", "ntia-diagnostics:diagnostics",
+        "core:recorder",
+        "ntia-scos:schedule",
+        "ntia-scos:action",
+        "ntia-core:classification",
+        "ntia-algorithm:processing",
+        "ntia-algorithm:processing_info",
+        "ntia-algorithm:data_products",
+        "ntia-diagnostics:diagnostics",
     ]
     _GLOBAL_KEYS.pop(_GLOBAL_KEYS.index("ntia-sensor:calibration_datetime"))
     _GLOBAL_KEYS.pop(_GLOBAL_KEYS.index("ntia-algorithm:digital_filters"))
@@ -224,7 +230,7 @@ class MetadataSince0_5(SchemaBase, kw_only=True):
             processing: Optional[Tuple[str, ...]] = None
             reference: Optional[str] = None
             description: Optional[str] = None
-        
+
         class DigitalFilter(msgspec.Struct, frozen=True, tag="DigitalFilter"):
             id: str
             filter_type: str
@@ -242,7 +248,7 @@ class MetadataSince0_5(SchemaBase, kw_only=True):
             window: str
             baseband: bool
             description: Optional[str] = None
-        
+
         extensions: Tuple[frozendict, ...]
         processing: Tuple[str]
         processing_info: Tuple[Union[DigitalFilter, DFT], ...]
@@ -250,8 +256,75 @@ class MetadataSince0_5(SchemaBase, kw_only=True):
         max_of_max_channel_powers: Tuple[float, ...]
         median_of_mean_channel_powers: Tuple[float, ...]
         diagnostics: frozendict = frozendict()
-        
+
     global_: Global = msgspec.field(name="global")
     annotations: Tuple[frozendict, ...]
     captures: Tuple[frozendict, ...]
 
+
+class Metadata0_6(SchemaBase, kw_only=True):
+    _GLOBAL_KEYS = Metadata0_5._GLOBAL_KEYS + [
+        "ntia-nasctn-sea:mean_channel_powers",
+        "ntia-nasctn-sea:median_channel_powers",
+    ]
+    _GLOBAL_KEYS_RENAME = {k.rsplit(":", 1)[1]: k for k in _GLOBAL_KEYS}
+
+    # The following is identical to v0.5, with mean_channel_powers and
+    # median_channel_powers added.
+
+    # Other metadata changes in this version only affect diagnostics and sensor hardware
+    # information, which are not loaded using a msgspect Struct by this package at present.
+    # The existing loading of the global diagnostics and ntia-sensor:sensor objects as
+    # dictionaries will still work, but will have additional keys compared to v0.5.0.
+    class Global(
+        GlobalSchemaBase, kw_only=True, rename=_GLOBAL_KEYS_RENAME, frozen=True
+    ):
+        class Graph(msgspec.Struct, frozen=True):
+            name: str
+            series: Optional[Tuple[str, ...]] = None
+            length: Optional[int] = None
+            x_units: Optional[str] = None
+            x_axis: Optional[Tuple[Union[int, float, str], ...]] = None
+            x_start: Optional[Tuple[float, ...]] = None
+            x_stop: Optional[Tuple[float, ...]] = None
+            x_step: Optional[Tuple[float, ...]] = None
+            y_units: Optional[str] = None
+            y_axis: Optional[Tuple[Union[int, float, str], ...]] = None
+            y_start: Optional[Tuple[float, ...]] = None
+            y_stop: Optional[Tuple[float, ...]] = None
+            y_step: Optional[Tuple[float, ...]] = None
+            processing: Optional[Tuple[str, ...]] = None
+            reference: Optional[str] = None
+            description: Optional[str] = None
+
+        class DigitalFilter(msgspec.Struct, frozen=True, tag="DigitalFilter"):
+            id: str
+            filter_type: str
+            feedforward_coefficients: Optional[Tuple[float, ...]] = None
+            feedback_coefficients: Optional[Tuple[float, ...]] = None
+            attenuation_cutoff: Optional[float] = None
+            frequency_cutoff: Optional[float] = None
+            description: Optional[str] = None
+
+        class DFT(msgspec.Struct, frozen=True, tag="DFT"):
+            id: str
+            equivalent_noise_bandwidth: float
+            samples: int
+            dfts: int
+            window: str
+            baseband: bool
+            description: Optional[str] = None
+
+        extensions: Tuple[frozendict, ...]
+        processing: Tuple[str]
+        processing_info: Tuple[Union[DigitalFilter, DFT], ...]
+        data_products: Tuple[Graph, ...]
+        max_of_max_channel_powers: Tuple[float, ...]
+        median_of_mean_channel_powers: Tuple[float, ...]
+        mean_channel_powers: Tuple[float, ...]
+        median_channel_powers: Tuple[float, ...]
+        diagnostics: frozendict = frozendict()
+
+    global_: Global = msgspec.field(name="global")
+    annotations: Tuple[frozendict, ...]
+    captures: Tuple[frozendict, ...]

@@ -24,7 +24,8 @@ from .schemas import (
     SchemaBase,
     MetadataPre0_4,
     Metadata0_4,
-    MetadataSince0_5,
+    Metadata0_5,
+    Metadata0_6,
     VersionInfo,
 )
 
@@ -83,7 +84,9 @@ def _trace_index(trace_dicts: typing.Tuple[frozendict]) -> pd.MultiIndex:
     if "detector" in df.columns:
         df.loc[:, "detector"].replace({"max": "peak", "mean": "rms"}, inplace=True)
     if "capture_statistic" in df.columns:
-        df.loc[:, "capture_statistic"].replace({"maximum": "max", "minimum": "min"}, inplace=True)
+        df.loc[:, "capture_statistic"].replace(
+            {"maximum": "max", "minimum": "min"}, inplace=True
+        )
     return pd.MultiIndex.from_frame(df)
 
 
@@ -107,7 +110,12 @@ class _LoaderBase:
         for (trace_type, trace_name), trace in zip(self.trace_starts.values(), traces):
             trace_groups[trace_type][trace_name].append(np.array(trace))
 
-        trace_groups = {trace_type: {name: np.array(v) for name, v in trace_groups[trace_type].items()} for trace_type in self.TABULAR_GROUPS}
+        trace_groups = {
+            trace_type: {
+                name: np.array(v) for name, v in trace_groups[trace_type].items()
+            }
+            for trace_type in self.TABULAR_GROUPS
+        }
 
         return dict(trace_groups, **self.meta)
 
@@ -697,6 +705,7 @@ class _Loader_v4(_LoaderBase):
             sensor_metadata=frozendict(timezone=json_meta.timezone),
         )
 
+
 class _Loader_v5(_LoaderBase):
     TABULAR_GROUPS = dict(
         psd="Power Spectral Density",
@@ -734,20 +743,24 @@ class _Loader_v5(_LoaderBase):
 
     @classmethod
     @methodtools.lru_cache()
-    def _get_trace_metadata(cls, data_products: typing.Tuple[MetadataSince0_5.Global.Graph]):
+    def _get_trace_metadata(cls, data_products: typing.Tuple[Metadata0_5.Global.Graph]):
         # Cached since data_products should not change often
         offset_total = 0
         trace_offsets = []
         trace_labels = []
         for graph_obj in data_products:
-            short_name = list(cls.TABULAR_GROUPS.keys())[list(cls.TABULAR_GROUPS.values()).index(graph_obj.name)]
+            short_name = list(cls.TABULAR_GROUPS.keys())[
+                list(cls.TABULAR_GROUPS.values()).index(graph_obj.name)
+            ]
             if short_name not in cls.TABULAR_GROUPS:
-                raise ValueError(f"Unknown data product encountered in metadata: {graph_obj.name}")
+                raise ValueError(
+                    f"Unknown data product encountered in metadata: {graph_obj.name}"
+                )
             if short_name == "apd":
                 # APD handling: mimic v4 loading with temporary unlabeled trace object
                 # The APD "Graph" object does not have a "series" (graph_obj.series is None here)
                 trace_offsets.append(offset_total)
-                trace_obj = frozendict({k:v for k, v in _UNLABELED_TRACE.items()})
+                trace_obj = frozendict({k: v for k, v in _UNLABELED_TRACE.items()})
                 trace_labels.append(TypeInfo(short_name, trace_obj))
                 offset_total += graph_obj.length
             else:
@@ -759,10 +772,12 @@ class _Loader_v5(_LoaderBase):
                     if short_name == "pfp":
                         # PFP handling: statistic and detector, delimited by "_"
                         # Example: "mean_minimum" is RMS detector, minimum statistic.
-                        trace_obj = frozendict({
-                            "capture_statistic": series_name.split("_")[1],
-                            "detector": series_name.split("_")[0]
-                        })
+                        trace_obj = frozendict(
+                            {
+                                "capture_statistic": series_name.split("_")[1],
+                                "detector": series_name.split("_")[0],
+                            }
+                        )
                     elif short_name == "psd":
                         # PSD series names are statistic names
                         trace_obj = frozendict({"capture_statistic": series_name})
@@ -773,11 +788,13 @@ class _Loader_v5(_LoaderBase):
                     trace_labels.append(TypeInfo(short_name, trace_obj))
         cls._trace_offsets = dict(zip(trace_offsets, trace_labels))
         return np.array(trace_offsets), trace_labels
-    
-    def _set_trace_axes(self, data_products: typing.Tuple[MetadataSince0_5.Global.Graph]):
+
+    def _set_trace_axes(self, data_products: typing.Tuple[Metadata0_5.Global.Graph]):
         # Set the axes/index for each data product, using the Graph metadata
         for graph in data_products:
-            short_name = list(self.TABULAR_GROUPS.keys())[list(self.TABULAR_GROUPS.values()).index(graph.name)]
+            short_name = list(self.TABULAR_GROUPS.keys())[
+                list(self.TABULAR_GROUPS.values()).index(graph.name)
+            ]
             if short_name == "apd":
                 # APD handling: use y-values instead of x-values
                 start, step, units = graph.y_start, graph.y_step, graph.y_units
@@ -789,13 +806,16 @@ class _Loader_v5(_LoaderBase):
                 start, step = int(start), int(step)
             # Generate and store the index
             self.trace_axes[short_name] = (
-                pd.RangeIndex(graph.length, name=self.TRACE_INDEX_LABELMAP[short_name].format(units))
+                pd.RangeIndex(
+                    graph.length,
+                    name=self.TRACE_INDEX_LABELMAP[short_name].format(units),
+                )
                 * step
                 + start
             )
-    
+
     @functools.wraps(_LoaderBase.__init__)
-    def __init__(self, json_meta: MetadataSince0_5):
+    def __init__(self, json_meta: Metadata0_5):
         data_products = json_meta.global_.data_products
         trace_offsets, trace_labels = self._get_trace_metadata(data_products)
         self.trace_axes = {}
@@ -874,16 +894,31 @@ def select_loader(
         return MetadataPre0_4.fromstr(json_str), _Loader_v3
     elif version == "v0.4":
         return Metadata0_4.fromstr(json_str), _Loader_v4
-    elif version == "v0.4.0": # This is confusing but correct
+    elif version == "v0.4.0":  # This is confusing but correct for v5
+        # The following manual JSON fixes are needed for parsing v5 metadata:
         proc_info_str = b'        "ntia-algorithm:processing_info": [\n            {'
         dft_info_str = b'},\n            {\n                "id": "psd_fft",'
         proc_info_str_min = b'"ntia-algorithm:processing_info":[{'
         dft_info_str_min = b'},{"id":"psd_fft",'
-        json_str = json_str.replace(proc_info_str, proc_info_str + b'\n                "type": "DigitalFilter",')
-        json_str = json_str.replace(dft_info_str, dft_info_str + b'\n                "type": "DFT",')
-        json_str = json_str.replace(proc_info_str_min, proc_info_str_min + b'"type":"DigitalFilter",')
-        json_str = json_str.replace(dft_info_str_min, dft_info_str_min + b'"type":"DFT",')
-        return MetadataSince0_5.fromstr(json_str), _Loader_v5
+        json_str = json_str.replace(
+            proc_info_str, proc_info_str + b'\n                "type": "DigitalFilter",'
+        )
+        json_str = json_str.replace(
+            dft_info_str, dft_info_str + b'\n                "type": "DFT",'
+        )
+        json_str = json_str.replace(
+            proc_info_str_min, proc_info_str_min + b'"type":"DigitalFilter",'
+        )
+        json_str = json_str.replace(
+            dft_info_str_min, dft_info_str_min + b'"type":"DFT",'
+        )
+        return Metadata0_5.fromstr(json_str), _Loader_v5
+    elif version == "v0.6.0":
+        # This is not an error- _Loader_v5 works for v0.6.0 metadata due to the
+        # similarity between the two versions (and the lack of explicit struct-based
+        # handling for sensor hardware information and diagnostics -see the note in
+        # the Metadata0_6 class for more information on this.)
+        return Metadata0_6.fromstr(json_str), _Loader_v5
     else:
         raise ValueError(f'unrecognized format version "{version}"')
 

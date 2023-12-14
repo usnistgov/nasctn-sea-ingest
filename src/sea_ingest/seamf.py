@@ -913,7 +913,7 @@ def select_loader(
             dft_info_str_min, dft_info_str_min + b'"type":"DFT",'
         )
         return Metadata0_5.fromstr(json_str), _Loader_v5
-    elif version == "v0.6.0":
+    elif version in ["v0.6.0", "0.6.0"]:
         # This is not an error- _Loader_v5 works for v0.6.0 metadata due to the
         # similarity between the two versions (and the lack of explicit struct-based
         # handling for sensor hardware information and diagnostics -see the note in

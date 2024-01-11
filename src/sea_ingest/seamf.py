@@ -373,10 +373,14 @@ class _Loader_v2(_LoaderBase):
             schedule_start_datetime=_iso_to_datetime(
                 json_meta.global_.schedule["start"],
             ),
-            schedule_interval=json_meta.global_.schedule["interval"],
             task=json_meta.global_.task,
             diagnostics_datetime=_iso_to_datetime(diagnostics["diagnostics_datetime"]),
         )
+        # Interval key may not exist in schedule entry, for one-off action results
+        if "interval" in json_meta.global_.schedule:
+            sweep_meta.update(dict(schedule_interval=json_meta.global_.schedule["interval"]))
+        else:
+            sweep_meta.update(dict(schedule_interval=None))
 
         for v in diagnostics.values():
             if isinstance(v, dict):
@@ -544,10 +548,14 @@ class _Loader_v3(_LoaderBase):
             schedule_start_datetime=_iso_to_datetime(
                 json_meta.global_.schedule["start"],
             ),
-            schedule_interval=json_meta.global_.schedule["interval"],
             task=json_meta.global_.task,
             diagnostics_datetime=_iso_to_datetime(diagnostics["diagnostics_datetime"]),
         )
+        # Interval key may not exist in schedule entry, for one-off action results
+        if "interval" in json_meta.global_.schedule:
+            sweep_meta.update(dict(schedule_interval=json_meta.global_.schedule["interval"]))
+        else:
+            sweep_meta.update(dict(schedule_interval=None))
 
         sweep_meta.update(_flatten_dict(dict(diagnostics=diagnostics)))
 
@@ -691,12 +699,17 @@ class _Loader_v4(_LoaderBase):
             schedule_start_datetime=_iso_to_datetime(
                 json_meta.global_.schedule["start"],
             ),
-            schedule_interval=json_meta.global_.schedule["interval"],
             task=json_meta.global_.task,
             diagnostics_datetime=_iso_to_datetime(
                 json_meta.global_.diagnostics["datetime"],
             ),
         )
+        # Interval key may not exist in schedule entry, for one-off action results
+        if "interval" in json_meta.global_.schedule:
+            sweep_meta.update(dict(schedule_interval=json_meta.global_.schedule["interval"]))
+        else:
+            sweep_meta.update(dict(schedule_interval=None))
+        
         sweep_meta.update(json_meta.global_.diagnostics)
 
         self.meta = frozendict(
@@ -855,12 +868,17 @@ class _Loader_v5(_LoaderBase):
             schedule_start_datetime=_iso_to_datetime(
                 json_meta.global_.schedule["start"],
             ),
-            schedule_interval=json_meta.global_.schedule["interval"],
             task=json_meta.global_.task,
             diagnostics_datetime=_iso_to_datetime(
                 json_meta.global_.diagnostics["datetime"],
             ),
         )
+        # Interval key may not exist in schedule entry, for one-off action results
+        if "interval" in json_meta.global_.schedule:
+            sweep_meta.update(dict(schedule_interval=json_meta.global_.schedule["interval"]))
+        else:
+            sweep_meta.update(dict(schedule_interval=None))
+        
         sweep_meta.update(json_meta.global_.diagnostics)
         self.meta = frozendict(
             channel_metadata=frozendict(channel_meta),

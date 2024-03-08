@@ -10,6 +10,23 @@ from matplotlib.ticker import EngFormatter, MultipleLocator
 
 from .util import trace
 
+def share_all_xaxes(ax: mpl.axes.Axes, *axs: mpl.axes.Axes):
+    for next_ax in axs:
+        try:
+            next_ax.sharex(ax)
+        except ValueError as ex:
+            if 'already shared' not in str(ex):
+                raise
+        ax = next_ax
+
+def share_all_yaxes(ax: mpl.axes.Axes, *axs: mpl.axes.Axes):
+    for next_ax in axs:
+        try:
+            next_ax.sharey(ax)
+        except ValueError as ex:
+            if 'already shared' not in str(ex):
+                raise
+        ax = next_ax
 
 def transposed_legend(ax, *args, **kws):
     def flip(items, ncol):
@@ -35,19 +52,25 @@ def nearest_datetimes(df, targets):
     return df.index[df.index.get_indexer(list(targets), method="nearest")]
 
 
-def plot_pvt_detail(day, freq, detail_datetimes, legend_ax_index=0):
+def plot_pvt_detail(day, freq, detail_datetime_targets, legend_ax_index=0, figsize=None):
     fig, axs = plt.subplots(
-        nrows=len(detail_datetimes),
-        figsize=(6 + 2 / 3, 4),
+        nrows=len(detail_datetime_targets),
+        figsize=figsize,
         layout="constrained",
         sharey=True,
     )
 
     detail_label_style = dict(
-        fontdict={"size": 12},
         bbox=dict(boxstyle="square", facecolor="white"),
         color="black",
     )
+
+    pvt_traces = trace(dfs=day, type="pvt", detector='peak', frequency=freq)
+
+    detail_datetimes = {
+        k: nearest_datetimes(pvt_traces, [v])[0]
+        for k, v in detail_datetime_targets.items()
+    }
 
     # detail view
     for (label, datetime), ax in zip(detail_datetimes.items(), axs[0:]):
@@ -65,7 +88,7 @@ def plot_pvt_detail(day, freq, detail_datetimes, legend_ax_index=0):
 
         pvt_traces.T.iloc[:, ::-1].plot(ax=ax, legend=False)
 
-        ax.get_shared_x_axes().join(*axs[-len(detail_datetimes) :])
+        share_all_xaxes(ax, *axs[-len(detail_datetimes) :])
         ax.grid(True)
 
     axs[legend_ax_index].legend(["RMS detector", "Peak detector"], loc="best", ncol=2)
@@ -76,9 +99,8 @@ def plot_pvt_detail(day, freq, detail_datetimes, legend_ax_index=0):
     return fig
 
 
-def plot_psd_detail(day, detail_trace_targets):
+def plot_psd_detail(day, detail_trace_targets, figsize=None):
     detail_label_style = dict(
-        fontdict={"size": 12},
         bbox=dict(boxstyle="square", facecolor="white"),
         color="black",
     )
@@ -92,7 +114,7 @@ def plot_psd_detail(day, detail_trace_targets):
 
     fig, axs = plt.subplots(
         nrows=len(f0_datetimes),
-        figsize=(6 + 2 / 3, 4),
+        figsize=figsize,
         layout="constrained",
         sharey=True,
         sharex=True,
@@ -102,9 +124,17 @@ def plot_psd_detail(day, detail_trace_targets):
         Ntraces = psd.loc[datetime].shape[0]
         sweep = psd.loc[datetime:].iloc[: Nfreqs * Ntraces]
 
-        sweep = sweep.reset_index("datetime", drop=True).unstack("frequency").T
+        sweep = (
+            sweep
+            .unstack('capture_statistic')
+            .reset_index('datetime', drop=True)
+            .T
+            .unstack('capture_statistic')
+            .stack('frequency')
+        )
         sweep.index = pd.Index(
-            np.array(tuple(sweep.index.values)).sum(axis=1), name="Frequency"
+            np.array(tuple(sweep.index.values)).sum(axis=1),
+            name="Frequency"
         )
         sweep.sort_index().iloc[:, ::-1].plot(ax=ax, lw=1, legend=False)
         ax.grid(True, which="both", axis="x")
@@ -129,15 +159,14 @@ def plot_psd_detail(day, detail_trace_targets):
     return fig
 
 
-def plot_pfp_span_with_detail(day, freq, pfp_indicators, span, detail_datetimes):
+def plot_pfp_span_with_detail(day, freq, pfp_indicators, span, detail_datetimes, figsize=None):
     detail_label_style = dict(
-        fontdict={"size": 12},
         bbox=dict(boxstyle="square", facecolor="white"),
         color="black",
     )
 
     fig, axs = plt.subplots(
-        nrows=len(detail_datetimes) + 1, figsize=(6 + 2 / 3, 6), layout="constrained"
+        nrows=len(detail_datetimes) + 1, figsize=figsize, layout="constrained"
     )
 
     # mid-scale view
@@ -147,7 +176,7 @@ def plot_pfp_span_with_detail(day, freq, pfp_indicators, span, detail_datetimes)
         axs[0].text(index, -55, label, va="center", ha="center", **detail_label_style)
     axs[0].xaxis.set_major_formatter(DateFormatter("%H:%M"))
     axs[0].set_xlabel("Local time")
-    axs[0].set_ylim([None, pfp_indicators["Frame max (peak detect)"].max() + 18])
+    axs[0].set_ylim([None, pfp_indicators["Peak power: Extrema max"].max() + 18])
     axs[0].grid(True)
     fig.legend(ncol=3, columnspacing=0.5, loc="upper right", framealpha=1)
     for t in axs[0].xaxis.get_ticklabels():
@@ -187,7 +216,7 @@ def plot_pfp_span_with_detail(day, freq, pfp_indicators, span, detail_datetimes)
             )
 
         pfp_ind = pfp_indicators.loc[datetime].loc[
-            ["Frame median (RMS detect)", "Frame max (peak detect)"]
+            ["Avg. power: Trace median", "Peak power: Extrema max"]
         ]
 
         for power, color in zip(pfp_ind, ["C0", "C1"]):
@@ -195,8 +224,8 @@ def plot_pfp_span_with_detail(day, freq, pfp_indicators, span, detail_datetimes)
 
         # ax.set_xlim([0,10.3e-3])
 
-        ax.get_shared_x_axes().join(*axs[-len(detail_datetimes) :])
-        ax.get_shared_y_axes().join(*axs[-len(detail_datetimes) :])
+        share_all_xaxes(ax, *axs[-len(detail_datetimes) :])
+        share_all_yaxes(ax, *axs[-len(detail_datetimes) :])
         ax.grid(True)
 
         if label == list(detail_datetimes.keys())[0]:

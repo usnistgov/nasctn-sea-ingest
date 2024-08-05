@@ -42,6 +42,7 @@ class QuackZipInfo(msgspec.Struct):
     compress_size: int
     file_size: int
     _raw_time: int
+    _end_offset: int = None
 
     __repr__ = zipfile.ZipInfo.__repr__
     FileHeader = zipfile.ZipInfo.FileHeader

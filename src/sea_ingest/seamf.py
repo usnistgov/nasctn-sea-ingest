@@ -1040,12 +1040,10 @@ def read_seamf_meta(file, parse=True, tz=None):
         kws = {"fileobj": file}
 
     with TarFile(**kws) as tar_fd:
-        name = tar_fd.getnames()[0]
-
-        # meta is plain json
-        meta_name = "/".join((name, name + ".sigmf-meta"))
-
-        meta_contents = tar_fd.extractfile(meta_name).read()
+        name = [m for m in tar_fd.getmembers() if m.name.endswith(".sigmf-meta")]
+        if len(name) != 1:
+            raise Exception(f"SigMF metadata file not found in archive {file}")
+        meta_contents = tar_fd.extractfile(name[0]).read()
 
     if not parse:
         return meta_contents

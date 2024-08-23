@@ -52,7 +52,6 @@ class QuackZipInfo(msgspec.Struct):
     @classmethod
     def from_zipinfo(cls, zinfo):
         kws = {k: getattr(zinfo, k) for k in zinfo.__slots__ if k != "_end_offset"}
-        raise
         return cls(**kws)
 
     @classmethod

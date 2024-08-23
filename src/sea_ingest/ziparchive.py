@@ -26,7 +26,7 @@ class QuackZipInfo(msgspec.Struct):
     filename: str
     date_time: tuple
     compress_type: int
-    _compresslevel: typing.Union[int, None]
+    _compresslevel: typing.Optional[int]
     comment: bytes
     extra: bytes
     create_system: int
@@ -42,6 +42,7 @@ class QuackZipInfo(msgspec.Struct):
     compress_size: int
     file_size: int
     _raw_time: int
+    _end_offset: typing.Optional[int] = None
 
     __repr__ = zipfile.ZipInfo.__repr__
     FileHeader = zipfile.ZipInfo.FileHeader
@@ -51,7 +52,7 @@ class QuackZipInfo(msgspec.Struct):
 
     @classmethod
     def from_zipinfo(cls, zinfo):
-        kws = {k: getattr(zinfo, k) for k in zinfo.__slots__}
+        kws = {k: getattr(zinfo, k) for k in zinfo.__slots__ if k != "_end_offset"}
         return cls(**kws)
 
     @classmethod

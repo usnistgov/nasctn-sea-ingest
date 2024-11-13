@@ -4,10 +4,6 @@ This repository is focused on fast and convenient loading of many "seamf" SEA se
 
 The data products and metadata are packaged into pandas or dask DataFrame objects. From there, the data can be analyzed directly, or piped into files or databases using dask multiprocessing hooks.
 
-See also:
-
-- [sea-data-product](https://github.com/NTIA/sea-data-product): the latest usage and clear reference implementation for reading the seamf data format
-
 ## Installation
 
 This makes the `sea_ingest` module available for import from your own python scripts.

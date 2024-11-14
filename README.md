@@ -1,52 +1,24 @@
 # NASCTN SEA Ingest
 
-This repository is focused on fast and convenient loading of many "seamf" SEA sensor output data files. These are the outputs from SEA sensors produced after edge compute analysis, with formatting based on SIGMF. Currently, `sea_ingest` supports file metadata versions {0.1, 0.2, 0.3, 0.4, 0.5, 0.6}.
+This repository contains `sea_ingest`, a Python package which can quickly and conveniently load many NASCTN SEA sensor data files. These are the outputs from SEA sensors produced after edge compute analysis, which follow the [SigMF](https://github.com/sigmf/sigmf) format. The `sea_ingest` package supports loading sensor metadata from both prototype- and production-era SEA sensors.
 
-The data products and metadata are packaged into pandas or dask DataFrame objects. From there, the data can be analyzed directly, or piped into files or databases using dask multiprocessing hooks.
+This tool parses data products and metadata from `.sigmf` files and packages them into [pandas](https://pandas.pydata.org/) or [Dask](https://www.dask.org/) DataFrame objects. From there, the data can be analyzed directly, or piped into files or databases using Dask multiprocessing hooks.
+
+## Background
+
+The National Advanced Spectrum and Communications Test Network ([NASCTN](https://www.nist.gov/ctl/nasctn/about)) aims to collect the data required to ascertain the effectiveness of the Citizens Broadband Radio Service (CBRS) sharing ecosystem through the Sharing Ecosystem Assessment ([SEA](https://www.nist.gov/programs-projects/cbrs-sharing-ecosystem-assessment)) project. Towards this end, NASCTN has designed and deployed a number of RF sensors across the country in key locations of interest. The sensors record IQ waveforms and process them at the edge into various informative data products, which are then pushed back to a central NASCTN data repository. Detailed information about the project, sensor design, and data processing algorithm is available in the [NASCTN SEA CBRS Task 2 Draft Test Plan](https://www.nist.gov/document/nasctn-cbrs-sea-task-2-draft-test-plan-december-2023).
+
+## Data Format
+
+The data files produced by SEA sensors conform to the [SigMF](https://github.com/sigmf/sigmf) standard, and use the [extension namespace defined by NTIA](https://github.com/NTIA/sigmf-ns-ntia). Each `.sigmf` file is a tarball containing a binary `.sigmf-data` file and a JSON `.sigmf-meta` file. The data file contains LZMA-compressed numerical data, the results of the edge compute data processing algorithm. The metadata file contains the necessary information to parse the data file, along with sensor diagnostics and other information. The easiest way to parse and interact with these files is using this tool, which transparently maps the `.sigmf` file contents into DataFrames.
 
 ## Installation
 
 This makes the `sea_ingest` module available for import from your own python scripts.
 
-### For coexistence with conda or mamba
-
-The idea here is to [re-use pre-existing base libraries when possible](https://www.anaconda.com/blog/using-pip-in-a-conda-environment) to minimize interaction problems between the two package managers.
-
 ```bash
-pip install --upgrade-strategy only-if-needed git+https://github.com/usnistgov/nasctn-sea-ingest
+pip install git+https://github.com/usnistgov/nasctn-sea-ingest@0.6.3
 ```
-
-### pip-only package management
-
-```bash
-pip install git+https://github.com/usnistgov/nasctn-sea-ingest
-```
-
-### Setting up the development environment to run notebooks or develop nasctn-sea-ingest
-
-The following apply if you'd like to clone and contribute to this project as a developer.
-
-1. Clone this repository:
-
-   ```bash
-   git clone https://github.com/usnistgov/nasctn-sea-ingest
-   ```
-
-2. Environment setup:
-   - Make sure you've installed **python 3.9 or newer** making sure to include `pip` for base package management (for example, with `conda` or `miniconda`)
-   - Make sure you've installed `pdm`, which is used for dependency management isolated from other projects. This only needs to be done once in your python environment (not once per project). To do so, run the following in a command line environment:
-
-      ```bash
-      pip install pdm
-      ```
-
-      _At this point, close and reopen open a new one to apply updated command line variables_
-   - Install the project environment with `pdm`:
-
-      ```bash
-      pdm use      
-      pdm install
-      ```
 
 ## Usage
 

@@ -1,31 +1,20 @@
-[tool]
-[tool.pdm]
-[tool.pdm.dev-dependencies]
-dev = [
-    "jupyter>=1.0",
-    "black>=23.0",
-    "labbench>=0.23.4",
-    "bokeh",
-    "line-profiler>=4.0.3",
-]
-
-[tool.pdm.build]
-package-dir = "src"
-includes = ["src/sea_ingest"]
-excludes = ["./**/.git","**/__pycache__"]
-
 [build-system]
-requires = ["pdm-backend"]
-build-backend = "pdm.backend"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
-[tool.pdm.version]
-source = "file"
+[tool.hatch.build.targets.wheel]
+includes = ["src/sea_ingest"]
+
+[tool.hatch.version]
 path = "src/sea_ingest/__init__.py"
 
 [project]
 name = "sea_ingest"
 dynamic = ["version"]
 description = "quick load and aggregate for low-level 'seamf' SEA sensor output data files"
+readme = "README.md"
+requires-python = ">=3.9,<3.12"
+license = {file = "LICENSE.md"}
 authors = [
     {name = "Dan Kuester", email = "daniel.kuester@nist.gov"},
 ]
@@ -46,5 +35,12 @@ dependencies = [
     "msgspec>=0.15",
     "line-profiler>=4.0.3",
 ]
-requires-python = ">=3.9,<3.12"
-license = {file = "LICENSE.md"}
+[project.optional-dependencies]
+dev = [
+    "jupyter>=1.0",
+    "black>=23.0",
+    "labbench>=0.23.4",
+    "bokeh",
+    "line-profiler>=4.0.3",
+    "hatchling",
+]

@@ -20,6 +20,23 @@ This makes the `sea_ingest` module available for import from your own python scr
 pip install git+https://github.com/usnistgov/nasctn-sea-ingest@0.6.4
 ```
 
+## Quick Start Guide
+
+Here is a quick example to get you started:
+
+```python
+from sea_ingest import read_seamf
+
+# Path to your .sigmf file
+file_path = "path/to/your/file.sigmf"
+
+# Read the data
+data = read_seamf(file_path)
+
+# Access, for example, the PSD data. In a Jupyter notebook, skip the "print()"!
+print(data["psd"])
+```
+
 ## Usage
 
 Once installed, the module is importable in any Python program. For some usage examples,

@@ -43,4 +43,27 @@ dev = [
     "bokeh",
     "line-profiler>=4.0.3",
     "hatchling",
+    "tox",
+    "pytest",
 ]
+
+[tool.tox]
+min_version = "4.21.1"
+env_list = ["3.9", "3.10", "3.11"]
+skip_missing_interpreters = true
+
+[tool.tox.env.testenv]
+description = "Run tests with pytest and generate coverage report"
+extras = "tests"
+commands = [
+    "pytest",
+    "--cov-report=term-missing",
+    "--no-cov-on-fail",
+    "--cov",
+    { replace = "posargs", extend = true },
+]
+
+[tool.tox.gh.python] # tox-gh config for GitHub Actions testing
+"3.9" = ["3.9"]
+"3.10" = ["3.10"]
+"3.11" = ["3.11"]

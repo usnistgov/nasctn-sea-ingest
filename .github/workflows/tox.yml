@@ -41,7 +41,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.py }}
-      - name: Checkout scos-tekrsa
+      - name: Checkout repository
         uses: actions/checkout@v4
       - name: Install tox-gh
         run: python -m pip install tox-gh

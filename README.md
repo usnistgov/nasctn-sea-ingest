@@ -30,7 +30,7 @@ The data files produced by SEA sensors conform to the [SigMF](https://github.com
 This makes the `sea_ingest` module available for import from your own python scripts.
 
 ```bash
-pip install git+https://github.com/usnistgov/nasctn-sea-ingest@0.6.4
+pip install git+https://github.com/usnistgov/nasctn-sea-ingest@1.0.0
 ```
 
 ## Quick Start Guide

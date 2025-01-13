@@ -5,6 +5,14 @@ from pathlib import Path
 
 
 class SchemaBase(msgspec.Struct, kw_only=True):
+    """
+    Base class for schemas.
+
+    Attributes:
+        _GLOBAL_KEYS (list): List of global keys.
+        _GLOBAL_KEYS_RENAME (dict): Dictionary mapping short keys to full keys.
+        timezone (Union[str, None]): Timezone information.
+    """
     _GLOBAL_KEYS = [
         "core:version",
         "core:extensions",
@@ -26,6 +34,15 @@ class SchemaBase(msgspec.Struct, kw_only=True):
 
     @classmethod
     def fromfile(cls, path_or_buf):
+        """
+        Creates an instance of the schema from a file.
+
+        Args:
+            path_or_buf (Union[str, Path, file-like]): Path to the file or file-like object.
+
+        Returns:
+            SchemaBase: An instance of the schema.
+        """
         if isinstance(path_or_buf, (str, Path)):
             with open(path_or_buf, "rb") as fb:
                 raw = fb.read()
@@ -36,6 +53,15 @@ class SchemaBase(msgspec.Struct, kw_only=True):
 
     @classmethod
     def fromstr(cls, json_str):
+        """
+        Creates an instance of the schema from a JSON string.
+
+        Args:
+            json_str (str): JSON string.
+
+        Returns:
+            SchemaBase: An instance of the schema.
+        """
         def dec_hook(type_, obj):
             return type_(obj)
 
@@ -45,7 +71,9 @@ class SchemaBase(msgspec.Struct, kw_only=True):
 
 
 class VersionInfo(SchemaBase, frozen=True):
-    """a minimal schema to quickly load version information from any version of the json metadata"""
+    """
+    A minimal schema to quickly load version information from any version of the JSON metadata.
+    """
 
     REMAP = {"version": "core:version", "extensions": "core:extensions"}
 

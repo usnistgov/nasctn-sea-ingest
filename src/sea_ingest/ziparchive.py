@@ -20,7 +20,32 @@ from .seamf import _iso_to_datetime, localize_timestamps, read_seamf, read_seamf
 
 
 class QuackZipInfo(msgspec.Struct):
-    """duck-typed ZipInfo clone for fast IPC"""
+    """
+    Duck-typed ZipInfo clone for fast IPC.
+
+    Attributes:
+        orig_filename (str): Original filename.
+        filename (str): Filename.
+        date_time (tuple): Date and time.
+        compress_type (int): Compression type.
+        _compresslevel (typing.Optional[int]): Compression level.
+        comment (bytes): Comment.
+        extra (bytes): Extra data.
+        create_system (int): Create system.
+        create_version (int): Create version.
+        extract_version (int): Extract version.
+        reserved (int): Reserved.
+        flag_bits (int): Flag bits.
+        volume (int): Volume.
+        internal_attr (int): Internal attributes.
+        external_attr (int): External attributes.
+        header_offset (int): Header offset.
+        CRC (int): CRC.
+        compress_size (int): Compressed size.
+        file_size (int): File size.
+        _raw_time (int): Raw time.
+        _end_offset (typing.Optional[int]): End offset.
+    """
 
     orig_filename: str
     filename: str

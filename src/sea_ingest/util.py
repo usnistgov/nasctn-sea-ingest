@@ -4,8 +4,16 @@ import numpy as np
 
 
 def _iso_to_datetime(s, tz=None):
-    """returns a timezone aware datetime from a metadata timestamp string"""
+    """
+    Returns a timezone-aware datetime from a metadata timestamp string.
 
+    Args:
+        s (str): The ISO 8601 timestamp string.
+        tz (str, optional): The timezone to convert to. Defaults to None.
+
+    Returns:
+        pd.Timestamp: The timezone-aware datetime.
+    """
     if tz is None:
         return pd.Timestamp(np.datetime64(s[:-1])).tz_localize("utc")
     else:
@@ -13,24 +21,38 @@ def _iso_to_datetime(s, tz=None):
 
 
 class _CachedDataFrameInitializer:
-    """introspection on dtypes slows down new pandas DataFrame objects.
+    """
+    Introspection on dtypes slows down new pandas DataFrame objects.
 
-    cache them for repeated dataframe generation.
+    Cache them for repeated dataframe generation.
     """
 
     def __init__(self):
+        """
+        Initializes the _CachedDataFrameInitializer.
+        """
         self.cache = {}
 
     def DataFrame(self, values, cache_key, index=None, columns=None, dtype=None, **kws):
-        dtype = self.cache.get((cache_key, "dtype"), None)
+        """
+        Creates a cached pandas DataFrame.
 
-        # if columns is None:
-        #     columns = self.cache.get((cache_key, 'columns'), None)
+        Args:
+            values (array-like): The data to be stored in the DataFrame.
+            cache_key (str): The key to use for caching the DataFrame.
+            index (Index or array-like, optional): The index to use for the DataFrame. Defaults to None.
+            columns (Index or array-like, optional): The column labels to use for the DataFrame. Defaults to None.
+            dtype (dtype, optional): The data type to use for the DataFrame. Defaults to None.
+            **kws: Additional keyword arguments to pass to the DataFrame constructor.
+
+        Returns:
+            pd.DataFrame: The created DataFrame.
+        """
+        dtype = self.cache.get((cache_key, "dtype"), None)
 
         df = pd.DataFrame(values, index=index, columns=columns, dtype=dtype, **kws)
 
         self.cache[(cache_key, "dtype")] = df.dtypes.values
-        # self.cache[(cache_key, 'columns')] = df.columns
 
         return df
 
@@ -39,6 +61,16 @@ cpd = _CachedDataFrameInitializer()
 
 
 def localize_timestamps(dfs, tz=None):
+    """
+    Localizes the timestamps in the DataFrames to the specified timezone.
+
+    Args:
+        dfs (dict): A dictionary of DataFrames.
+        tz (str, optional): The timezone to convert to. Defaults to None.
+
+    Returns:
+        dict: The dictionary of DataFrames with localized timestamps.
+    """
     if tz is None:
         tz = dfs["sensor_metadata"]["timezone"]
 
@@ -46,20 +78,9 @@ def localize_timestamps(dfs, tz=None):
         if isinstance(df, pd.DataFrame) and "datetime" in df.index.names:
             df.index = df.index.set_levels(
                 df.index.get_level_values("datetime").tz_convert(tz),
-                level="datetime",
-                verify_integrity=False,
+                level="datetime"
             )
-
-        if isinstance(df, pd.DataFrame) and "metadata" in key:
-            # update metadata timestamps
-            dtypes = df.dtypes
-            new_dtypes = {}
-            for col in df.columns:
-                if isinstance(dtypes[col], pd.core.dtypes.dtypes.DatetimeTZDtype):
-                    new_dtypes[col] = pd.core.dtypes.dtypes.DatetimeTZDtype("ns", tz)
-            df = df.astype(new_dtypes)
-
-        dfs[key] = df
+    return dfs
 
 
 def _flatten_dict(d) -> frozendict:

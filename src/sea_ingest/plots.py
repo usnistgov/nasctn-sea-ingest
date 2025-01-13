@@ -11,6 +11,13 @@ from matplotlib.ticker import EngFormatter, MultipleLocator
 from .util import trace
 
 def share_all_xaxes(ax: mpl.axes.Axes, *axs: mpl.axes.Axes):
+    """
+    Shares the x-axis of the given axes with all subsequent axes.
+
+    Args:
+        ax (mpl.axes.Axes): The primary axes to share the x-axis from.
+        *axs (mpl.axes.Axes): Additional axes to share the x-axis with.
+    """
     for next_ax in axs:
         try:
             next_ax.sharex(ax)
@@ -20,6 +27,13 @@ def share_all_xaxes(ax: mpl.axes.Axes, *axs: mpl.axes.Axes):
         ax = next_ax
 
 def share_all_yaxes(ax: mpl.axes.Axes, *axs: mpl.axes.Axes):
+    """
+    Shares the y-axis of the given axes with all subsequent axes.
+
+    Args:
+        ax (mpl.axes.Axes): The primary axes to share the y-axis from.
+        *axs (mpl.axes.Axes): Additional axes to share the y-axis with.
+    """
     for next_ax in axs:
         try:
             next_ax.sharey(ax)
@@ -28,7 +42,18 @@ def share_all_yaxes(ax: mpl.axes.Axes, *axs: mpl.axes.Axes):
                 raise
         ax = next_ax
 
-def transposed_legend(ax, *args, **kws):
+def transposed_legend(ax: mpl.axes.Axes, *args, **kws):
+    """
+    Creates a transposed legend for the given axes.
+
+    Args:
+        ax (mpl.axes.Axes): The axes to create the legend for.
+        *args: Additional positional arguments for the legend.
+        **kws: Additional keyword arguments for the legend.
+
+    Returns:
+        Legend: The created legend.
+    """
     def flip(items, ncol):
         return itertools.chain(*[items[i::ncol] for i in range(ncol)])
 

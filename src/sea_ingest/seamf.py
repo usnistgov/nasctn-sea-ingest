@@ -37,12 +37,15 @@ timezone_at = functools.lru_cache(TimezoneFinder().unique_timezone_at)
 
 
 def _capture_index(channel_metadata: dict) -> pd.MultiIndex:
-    """returns a pd.MultiIndex containing datetime and frequency levels.
+    """
+    Returns a pd.MultiIndex containing datetime and frequency levels.
 
     Args:
-        channel_metadata: mapping keyed on frequency; each entry is a dict that includes a 'datetime' key
-    """
+        channel_metadata (dict): Mapping keyed on frequency; each entry is a dict that includes a 'datetime' key.
 
+    Returns:
+        pd.MultiIndex: MultiIndex with datetime and frequency levels.
+    """
     times, freqs = zip(*[[d["datetime"], k] for k, d in channel_metadata.items()])
 
     return pd.MultiIndex(
@@ -57,25 +60,51 @@ def _capture_index(channel_metadata: dict) -> pd.MultiIndex:
 def _pfp_index(
     pfp_sample_count: int, pvt_sample_count: int, iq_capture_duration_sec: float
 ) -> pd.MultiIndex:
+    """
+    Returns a pd.MultiIndex for PFP index.
+
+    Args:
+        pfp_sample_count (int): Number of PFP samples.
+        pvt_sample_count (int): Number of PVT samples.
+        iq_capture_duration_sec (float): IQ capture duration in seconds.
+
+    Returns:
+        pd.MultiIndex: MultiIndex for PFP index.
+    """
     base = pd.RangeIndex(pfp_sample_count, name="Frame time elapsed (s)")
     return base * (iq_capture_duration_sec / pfp_sample_count / pvt_sample_count)
 
 
 @functools.lru_cache()
 def _pvt_index(pvt_sample_count: int, iq_capture_duration_sec: float) -> pd.MultiIndex:
+    """
+    Returns a pd.MultiIndex for PVT index.
+
+    Args:
+        pvt_sample_count (int): Number of PVT samples.
+        iq_capture_duration_sec (float): IQ capture duration in seconds.
+
+    Returns:
+        pd.MultiIndex: MultiIndex for PVT index.
+    """
     base = pd.RangeIndex(pvt_sample_count, name="Capture time elapsed (s)")
     return base * (iq_capture_duration_sec / pvt_sample_count)
 
 
 @functools.lru_cache()
 def _psd_index(psd_sample_count, analysis_bandwidth_Hz) -> pd.MultiIndex:
-    base = pd.RangeIndex(psd_sample_count, name="Baseband Frequency (Hz)")
-    bin_center_offset = +analysis_bandwidth_Hz / psd_sample_count / 2
-    return (
-        base * (analysis_bandwidth_Hz / psd_sample_count)
-        - analysis_bandwidth_Hz / 2
-        + bin_center_offset
-    )
+    """
+    Returns a pd.MultiIndex for PSD index.
+
+    Args:
+        psd_sample_count (int): Number of PSD samples.
+        analysis_bandwidth_Hz (float): Analysis bandwidth in Hertz.
+
+    Returns:
+        pd.MultiIndex: MultiIndex for PSD index.
+    """
+    base = pd.RangeIndex(psd_sample_count, name="Frequency (Hz)")
+    return base * (analysis_bandwidth_Hz / psd_sample_count)
 
 
 @functools.lru_cache()

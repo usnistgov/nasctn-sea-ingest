@@ -62,8 +62,3 @@ commands = [
     "--cov",
     { replace = "posargs", extend = true },
 ]
-
-[tool.tox.gh.python] # tox-gh config for GitHub Actions testing
-"3.9" = ["3.9"]
-"3.10" = ["3.10"]
-"3.11" = ["3.11"]

@@ -1,15 +1,17 @@
 # NASCTN SEA Ingest
 
-
 [![GitHub release (latest SemVer)][latest-release-semver-badge]][github-releases]
 [![GitHub all releases][github-download-count-badge]][github-releases]
 [![GitHub issues][github-issue-count-badge]][github-issues]
+[![License][license-badge]][license-link]
 
 [latest-release-semver-badge]: https://img.shields.io/github/v/release/usnistgov/nasctn-sea-ingest?display_name=tag&sort=semver
 [github-releases]: https://github.com/usnistgov/nasctn-sea-ingest/releases
 [github-download-count-badge]: https://img.shields.io/github/downloads/usnistgov/nasctn-sea-ingest/total
 [github-issue-count-badge]: https://img.shields.io/github/issues/usnistgov/nasctn-sea-ingest
 [github-issues]: https://github.com/usnistgov/nasctn-sea-ingest/issues
+[license-badge]: https://img.shields.io/badge/license-NIST-brightgreen
+[license-link]: https://github.com/usnistgov/nasctn-sea-ingest/blob/main/LICENSE.md
 
 This repository contains `sea_ingest`, a Python package which can quickly and conveniently load many NASCTN SEA sensor data files. These are the outputs from SEA sensors produced after edge compute analysis, which follow the [SigMF](https://github.com/sigmf/sigmf) format. The `sea_ingest` package supports loading sensor metadata from both prototype- and production-era SEA sensors.
 

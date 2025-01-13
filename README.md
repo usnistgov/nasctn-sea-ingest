@@ -41,3 +41,44 @@ print(data["psd"])
 
 Once installed, the module is importable in any Python program. For some usage examples,
 see the Jupyter notebooks provided in [`demos`](https://github.com/usnistgov/nasctn-sea-ingest/tree/main/demos).
+
+## Development
+
+To contribute to this repository, clone it and install the package with development dependencies:
+
+```cmd
+git clone https://github.com/usnistgov/nasctn-sea-ingest
+cd nasctn-sea-ingest
+pip install .[dev]
+```
+
+### Packaging New Releases
+
+Once you've made changes and wish to issue a new release, increment the version number and build a wheel. The backend used by this project, [Hatchling](https://github.com/pypa/hatch/tree/master/backend), makes this easy. To change the version number:
+
+```cmd
+hatchling version major  # 1.0.0 -> 2.0.0
+hatchling version minor  # 1.0.0 -> 1.1.0
+hatchling version micro  # 1.0.0 -> 1.0.1
+hatchling version "X.X.X"  # 1.0.0 -> X.X.X
+```
+
+Then, to build a wheel and source distribution:
+
+```cmd
+hatchling build
+```
+
+### Running Tests
+
+Unit tests are included to test the `read_seamf` and `read_seamf_meta` functions by loading the included example data files. The testing packages [pytest](https://docs.pytest.org/en/7.1.x/) and [tox](https://tox.wiki/en/latest/) are installed with the development dependencies, and can be used as follows.
+
+```cmd
+pytest          # faster, but less thorough
+tox             # test code in virtual environments for multiple versions of Python
+tox --recreate  # To recreate the virtual environments used for testing
+```
+
+## Disclaimer
+
+"Certain commercial equipment, instruments, or materials (or suppliers, or software, ...) are identified in this paper to foster understanding. Such identification does not imply recommendation or endorsement by the National Institute of Standards and Technology, nor does it imply that the materials or equipment identified are necessarily the best available for the purpose.

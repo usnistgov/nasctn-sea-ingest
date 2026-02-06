@@ -10,7 +10,7 @@ import methodtools
 import numpy as np
 import pandas as pd
 from frozendict import frozendict
-from timezonefinder import TimezoneFinder
+#from timezonefinder import TimezoneFinder
 
 from .util import (
     _cartesian_multiindex,
@@ -33,8 +33,9 @@ TypeInfo = namedtuple("_TI", field_names=("type", "metadata"))
 _UNLABELED_TRACE = frozendict({None: None})
 
 # cached timezone lookups from location
-timezone_at = functools.lru_cache(TimezoneFinder().unique_timezone_at)
 
+#timezone_at = functools.lru_cache(TimezoneFinder().unique_timezone_at)
+timezone_at =lambda x: None
 
 def _capture_index(channel_metadata: dict) -> pd.MultiIndex:
     """

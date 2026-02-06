@@ -30,7 +30,6 @@ dependencies = [
     "dask[complete]>=2023.3.0",
     "lz4>=4.3.2",
     "matplotlib>=3.6",
-    "timezonefinder>=6.0.2",
     "numpy>=1.19,<2",
     "msgspec>=0.15",
     "line-profiler>=4.0.3",

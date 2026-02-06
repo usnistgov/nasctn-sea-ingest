@@ -35,8 +35,15 @@ _UNLABELED_TRACE = frozendict({None: None})
 # cached timezone lookups from location
 
 #timezone_at = functools.lru_cache(TimezoneFinder().unique_timezone_at)
-timezone_at =lambda x: None
-
+def timezone_at(lng,lat):
+    if -119<lng<-116:
+        return("America/Los_Angeles")
+    elif -116<lng<-80:
+        return("America/Denver")
+    elif -80<lng<60:
+        return("America/Boston")
+    else:
+        return None
 def _capture_index(channel_metadata: dict) -> pd.MultiIndex:
     """
     Returns a pd.MultiIndex containing datetime and frequency levels.

@@ -37,4 +37,4 @@ from .ziparchive import (
     restore_multiindex,
 )
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
